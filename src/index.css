@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+/* Class-based dark mode: <html class="dark"> flips the whole UI. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  --color-paper: #f4f6f9;
+  --color-ink: #111827;
+  --color-ink-soft: #4b5563;
+  --color-dark: #0a0e17;
+  --color-dark-2: #11161f;
+  --color-rule: #e5e7eb;
+  --color-rule-dark: #1f2531;
+  --color-electric: #0066ff;
+  --color-coral: #e53935;
+  --color-primary-text-dark: #e5eaf2;
+
+  /* Semantic surfaces — these are what the app chrome uses, and they flip in dark mode. */
+  --color-surface: #ffffff;
+  --color-surface-2: #f4f6f9;
+  --color-surface-3: #eef1f6;
+  --color-border: #e4e7ec;
+  --color-text: #111827;
+  --color-text-soft: #5b6472;
+  --color-text-faint: #8a94a3;
+}
+
+/*
+ * Dark theme. Only the semantic tokens change; component markup stays the same.
+ * The 1920×1080 video comp is NOT affected — generated films keep their own palette.
+ */
+.dark {
+  --color-surface: #11151c;
+  --color-surface-2: #0b0e13;
+  --color-surface-3: #171c25;
+  --color-border: #262d39;
+  --color-text: #e9edf4;
+  --color-text-soft: #a3adbb;
+  --color-text-faint: #6b7686;
+  --color-paper: #0b0e13;
+  --color-ink: #e9edf4;
+  --color-ink-soft: #a3adbb;
+  --color-rule: #262d39;
+  --color-electric: #4d94ff;
+}
+
+html {
+  scroll-behavior: smooth;
+  scroll-padding-top: 24px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background-color 220ms ease, color 220ms ease;
+}
+
+/* Scrollbars follow the theme. */
+* {
+  scrollbar-color: var(--color-border) transparent;
+}
+
+.font-serif-italic {
+  font-family: var(--font-serif);
+  font-style: italic;
+}
+
+/* Subtle noise/grain */
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 3px 3px;
+  mix-blend-mode: overlay;
+  opacity: 0.6;
+}
+
+/* Animated underline on hover */
+.link-underline {
+  background-image: linear-gradient(currentColor, currentColor);
+  background-size: 0% 1px;
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  transition: background-size 260ms ease;
+}
+.link-underline:hover {
+  background-size: 100% 1px;
+}
+
+/* Frame counter tick */
+@keyframes tick {
+  0% { opacity: 0.35; }
+  50% { opacity: 1; }
+  100% { opacity: 0.35; }
+}
+.blink-dot {
+  animation: tick 1s steps(2, end) infinite;
+}
+
+/* Scroll reveal helper */
+.reveal {
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 700ms ease, transform 700ms ease;
+}
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Selection */
+::selection {
+  background: #0066ff;
+  color: #f4f6f9;
+}
