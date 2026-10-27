@@ -306,6 +306,100 @@ export function GridBackground({
   );
 }
 
+export function Card({
+  frameAt = 4,
+  tilt = 0,
+  width = 720,
+  height,
+  mode = "dark",
+  borderRadius = 24,
+  children,
+  style,
+}: {
+  frameAt?: number;
+  tilt?: number;
+  width?: number | string;
+  height?: number | string;
+  mode?: "dark" | "light";
+  borderRadius?: number;
+  children?: ReactNode;
+  style?: CSSProperties;
+}) {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const p = spring({ frame: frame - frameAt, fps, config: { stiffness: 160, damping: 15, mass: 0.8 } });
+  const isDark = mode === "dark";
+  const bg = isDark ? "#12151D" : "#FFFFFF";
+  const border = isDark ? "1px solid rgba(255,255,255,0.12)" : "1px solid rgba(0,0,0,0.08)";
+  const shadow = isDark ? "0 30px 80px rgba(0,0,0,0.55)" : "0 30px 80px rgba(0,0,0,0.18)";
+
+  return (
+    <div
+      style={{
+        width,
+        height,
+        borderRadius,
+        background: bg,
+        border,
+        boxShadow: shadow,
+        transform: `translateY(${(1 - p) * 60}px) scale(${0.92 + p * 0.08}) rotate(${tilt}deg)`,
+        opacity: interpolate(frame, [frameAt, frameAt + 8], [0, 1], clamp),
+        position: "relative",
+        boxSizing: "border-box",
+        overflow: "hidden",
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function Heading({
+  title,
+  kicker,
+  frameAt = 2,
+  size = 56,
+  color,
+  kickerColor = "#0066ff",
+  style,
+}: {
+  title: string;
+  kicker?: string;
+  frameAt?: number;
+  size?: number;
+  color?: string;
+  kickerColor?: string;
+  style?: CSSProperties;
+}) {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const p = spring({ frame: frame - frameAt, fps, config: { stiffness: 160, damping: 18 } });
+  const opacity = interpolate(frame, [frameAt, frameAt + 8], [0, 1], clamp);
+
+  return (
+    <div
+      style={{
+        transform: `translateY(${(1 - p) * 24}px)`,
+        opacity,
+        ...style,
+      }}
+    >
+      {kicker && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <span style={{ width: 28, height: 2, background: kickerColor }} />
+          <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.22em", textTransform: "uppercase", color: kickerColor }}>
+            {kicker}
+          </span>
+        </div>
+      )}
+      <h2 style={{ fontSize: size, fontWeight: 750, letterSpacing: "-0.035em", lineHeight: 1.08, margin: 0, color: color ?? undefined }}>
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 /** The generated-code surface. Keep this low-level; it contains no layouts. */
 export const mg = Object.freeze({
   WordCue: WordCueMark,
@@ -321,6 +415,8 @@ export const mg = Object.freeze({
   Callout: FocusFrame,
   GridBackground,
   Grid: GridBackground,
+  Card,
+  Heading,
   AbsoluteFill,
   interpolate,
   spring,

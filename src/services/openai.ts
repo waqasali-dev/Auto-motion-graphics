@@ -4,7 +4,7 @@
 // Supports both OpenAI /v1/chat/completions and AgentRouter /v1/responses.
 
 import OpenAI from "openai";
-import { getEnv, hasValidKey, getEffectiveBaseURL, isAgentRouter } from "./env";
+import { getEnv, hasValidKey, getEffectiveBaseURL, isAgentRouter, OpenAIEnv } from "./env";
 import type { ShotPlanJSON } from "../sdk/contract.pipeline";
 import type {
   CreativePlanOutput,
@@ -37,8 +37,10 @@ export function getClient(): OpenAI | null {
   _client = new OpenAI({
     apiKey: env.apiKey,
     baseURL: effectiveBase,
+    timeout: 120000,
+    maxRetries: 2,
     dangerouslyAllowBrowser: true, // required for client-side usage — key is user-owned
-    defaultHeaders: AGENTROUTER_HEADERS,
+    defaultHeaders: isAgentRouter() ? AGENTROUTER_HEADERS : undefined,
   });
   _clientKey = key;
   return _client;
@@ -47,6 +49,95 @@ export function getClient(): OpenAI | null {
 export function resetClient() {
   _client = null;
   _clientKey = null;
+}
+
+/**
+ * Unified endpoint connection tester:
+ * - AgentRouter ONLY accepts /v1/responses (OpenAI Responses API) with CLI headers
+ * - HCNSEC / Standard OpenAI accepts /v1/chat/completions
+ */
+export async function testEndpointConnection(targetEnv: OpenAIEnv, isRoute1?: boolean): Promise<{ ok: boolean; msg: string }> {
+  if (!targetEnv.apiKey || targetEnv.apiKey.trim().length < 5) {
+    throw new Error("API Key is missing or too short.");
+  }
+
+  const isAgent = isRoute1 ?? ((targetEnv.baseURL || "").toLowerCase().includes("agentrouter.org") || isAgentRouter(targetEnv));
+
+  if (isAgent) {
+    let effectiveBase = targetEnv.baseURL || "https://agentrouter.org/v1";
+    effectiveBase = effectiveBase.replace(/\/+$/, "");
+    if (!effectiveBase.endsWith("/v1")) effectiveBase = `${effectiveBase}/v1`;
+
+    if (typeof window !== "undefined" && effectiveBase.includes("agentrouter.org")) {
+      effectiveBase = `${window.location.origin}/agentrouter-proxy/v1`;
+    }
+
+    const endpoint = `${effectiveBase}/responses`;
+    console.log(`[Test Connection] Testing AgentRouter via ${endpoint} with model ${targetEnv.model}`);
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${targetEnv.apiKey}`,
+        "Content-Type": "application/json",
+        ...AGENTROUTER_HEADERS,
+      },
+      body: JSON.stringify({
+        model: targetEnv.model || "gpt-6-astra",
+        input: [{ role: "user", content: "ping" }],
+        max_tokens: 15,
+        reasoning_effort: "none",
+        thinking: { type: "disabled" },
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      let errJson: any = null;
+      try { errJson = JSON.parse(errText); } catch {}
+      const msg = errJson?.error?.message || errText || `HTTP ${res.status}`;
+      return { ok: false, msg };
+    }
+
+    const data = await res.json();
+    if (data?.error) {
+      return { ok: false, msg: data.error.message || JSON.stringify(data.error) };
+    }
+
+    return {
+      ok: true,
+      msg: `Connected to ${targetEnv.baseURL} via /v1/responses — model "${targetEnv.model || "gpt-6-astra"}" responded OK!`,
+    };
+  } else {
+    let effectiveBase = targetEnv.baseURL || "https://api.openai.com/v1";
+    effectiveBase = effectiveBase.replace(/\/+$/, "");
+    if (!effectiveBase.endsWith("/v1")) effectiveBase = `${effectiveBase}/v1`;
+
+    console.log(`[Test Connection] Testing OpenAI/HCNSEC via ${effectiveBase}/chat/completions with model ${targetEnv.model}`);
+    const client = new OpenAI({
+      apiKey: targetEnv.apiKey,
+      baseURL: effectiveBase,
+      dangerouslyAllowBrowser: true,
+    });
+
+    try {
+      await client.models.list();
+    } catch {
+      // Some proxies disable /v1/models; proceed to completion probe
+    }
+
+    const completion = await client.chat.completions.create({
+      model: targetEnv.model,
+      messages: [{ role: "user", content: "ping" }],
+      max_tokens: 15,
+    });
+
+    const reply = completion.choices[0]?.message?.content || "OK";
+    return {
+      ok: true,
+      msg: `Connected to ${targetEnv.baseURL} via /v1/chat/completions — model "${targetEnv.model}" responded OK! (${reply.slice(0, 40).trim()})`,
+    };
+  }
 }
 
 export interface AgentRouterRequestOptions {
@@ -63,18 +154,26 @@ export interface AgentRouterRequestOptions {
 
 export function parseJsonOutput<T>(raw: string): T {
   let clean = raw.trim();
-  if (clean.startsWith("```")) {
-    clean = clean.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
+
+  // 1. If wrapped in markdown code fence, extract inside fence
+  const fenceMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenceMatch && fenceMatch[1]) {
+    clean = fenceMatch[1].trim();
   }
+
+  // 2. Locate first '{' and last '}'
   const firstBrace = clean.indexOf("{");
   const lastBrace = clean.lastIndexOf("}");
   if (firstBrace >= 0 && lastBrace > firstBrace) {
     clean = clean.substring(firstBrace, lastBrace + 1);
+  } else {
+    throw new Error(`No JSON object found in model output: ${clean.slice(0, 150)}`);
   }
+
   try {
     return JSON.parse(clean) as T;
   } catch (e) {
-    throw new Error(`The model returned invalid JSON: ${(e as Error).message}\nOutput: ${clean.slice(0, 300)}`);
+    throw new Error(`Invalid JSON syntax: ${(e as Error).message}\nOutput: ${clean.slice(0, 300)}`);
   }
 }
 
@@ -123,7 +222,7 @@ export async function sendAgentRouterRequest(options: AgentRouterRequestOptions 
     messages.push({ role: "user", content: prompt });
   }
 
-  const tokenLimit = maxOutputTokens || 16384;
+  const tokenLimit = maxOutputTokens || env.maxOutputTokens || 32768;
   const reqBody: Record<string, any> = {
     model,
     input: messages,
@@ -161,7 +260,7 @@ export async function sendAgentRouterRequest(options: AgentRouterRequestOptions 
         let errJson: any = null;
         try {
           errJson = JSON.parse(errText);
-        } catch {}
+        } catch { }
         const msg = errJson?.error?.message || errText || `HTTP ${res.status}`;
         throw new Error(msg);
       }
@@ -239,13 +338,25 @@ export async function sendAgentRouterRequest(options: AgentRouterRequestOptions 
         continue;
       }
 
-      onLog(`[AgentRouter] Attempt ${attempt} failed: ${errMsg}`);
       if (attempt < maxAttempts) {
+        const isRateLimit = /rate limit|exceeded.*rate limit|tokens per minute|tpm|rpm|too many requests|429/i.test(errMsg);
         const isTransient = /unreachable|empty response|500|502|503|504|ECONNRESET|fetch failed/i.test(errMsg);
-        const waitMs = isTransient ? Math.max(2500, 1500 * attempt) : 1200 * attempt;
+        let waitMs: number;
+        if (isRateLimit) {
+          // Token rate limits (TPM) need time to replenish tokens; back off with jitter
+          waitMs = Math.min(35000, 8000 * attempt + Math.floor(Math.random() * 2500));
+          onLog(`[Rate Limit] Token quota exceeded on model gateway. Cooling down for ${(waitMs / 1000).toFixed(1)}s before retry ${attempt + 1}/${maxAttempts}...`);
+        } else if (isTransient) {
+          waitMs = Math.max(3000, 2000 * attempt);
+          onLog(`[AgentRouter] Attempt ${attempt} transient network error: ${errMsg}. Retrying in ${(waitMs / 1000).toFixed(1)}s...`);
+        } else {
+          waitMs = 1500 * attempt;
+          onLog(`[AgentRouter] Attempt ${attempt} failed: ${errMsg}. Retrying in ${(waitMs / 1000).toFixed(1)}s...`);
+        }
         await sleep(waitMs);
         continue;
       }
+      onLog(`[AgentRouter] Attempt ${attempt} failed: ${errMsg}`);
       throw err;
     }
   }
@@ -353,13 +464,13 @@ Requirements:
 - Vary archetypes — never repeat consecutively
 - Keep dark theme ≤15% of shots`;
 
-  if (isAgentRouter() || model.includes("sol") || model.includes("astra")) {
+  if (isAgentRouter()) {
     const raw = await sendAgentRouterRequest({
       model,
       systemInstruction: systemPrompt,
       prompt: userPrompt,
       responseJsonSchema: SHOTPLAN_SCHEMA.schema,
-      maxOutputTokens: 8000,
+      maxOutputTokens: env.maxOutputTokens || 32768,
       onLog: onProgress,
     });
     const parsed = parseJsonOutput<ShotPlanJSON>(raw);
@@ -370,21 +481,46 @@ Requirements:
   const client = getClient();
   if (!client) throw new Error("OpenAI API key not configured. Set VITE_OPENAI_API_KEY in .env or via Settings.");
 
-  const completion = await client.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: SHOTPLAN_SCHEMA,
-    },
-    temperature: 0.7,
-    max_tokens: 8000,
-  });
+  console.log(`[Planner LLM] Calling ${getEffectiveBaseURL()} with model ${model}`);
+  let content: string | null | undefined;
+  try {
+    const completion = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: SHOTPLAN_SCHEMA,
+      },
+      temperature: 0.7,
+      max_tokens: env.maxOutputTokens || 32768,
+    });
 
-  const content = completion.choices[0]?.message?.content;
+    const msg = completion.choices[0]?.message as any;
+    content = msg?.content || msg?.reasoning_content;
+  } catch (schemaErr) {
+    const schemaErrMsg = (schemaErr as Error).message || "";
+    if (/response_format|json_schema|unsupported|not supported|schema/i.test(schemaErrMsg)) {
+      console.log(`[Planner LLM] json_schema rejected, falling back to json_object on ${getEffectiveBaseURL()}`);
+      const completion = await client.chat.completions.create({
+        model,
+        messages: [
+          { role: "system", content: `${systemPrompt}\n\nReturn strictly valid JSON matching this schema:\n${JSON.stringify(SHOTPLAN_SCHEMA.schema)}` },
+          { role: "user", content: userPrompt },
+        ],
+        response_format: { type: "json_object" },
+        temperature: 0.7,
+        max_tokens: env.maxOutputTokens || 32768,
+      });
+      const msg = completion.choices[0]?.message as any;
+      content = msg?.content || msg?.reasoning_content;
+    } else {
+      throw schemaErr;
+    }
+  }
+
   if (!content) throw new Error("Planner LLM returned empty response");
   const parsed = parseJsonOutput<ShotPlanJSON>(content);
   onProgress?.(`Planner complete — ${parsed.shots?.length ?? 0} shots generated`);
@@ -423,15 +559,15 @@ export async function transcribeAudio(file: File, onProgress?: (msg: string) => 
   const timedWords = data.words?.length
     ? data.words
     : (data.segments ?? []).flatMap((segment) => {
-        const tokens = segment.text.trim().split(/\s+/).filter(Boolean);
-        const span = Math.max(0.01, segment.end - segment.start);
-        return tokens.map((word, i) => ({
-          word,
-          start: segment.start + (span * i) / Math.max(1, tokens.length),
-          end: segment.start + (span * (i + 1)) / Math.max(1, tokens.length),
-          confidence: 0.72,
-        }));
-      });
+      const tokens = segment.text.trim().split(/\s+/).filter(Boolean);
+      const span = Math.max(0.01, segment.end - segment.start);
+      return tokens.map((word, i) => ({
+        word,
+        start: segment.start + (span * i) / Math.max(1, tokens.length),
+        end: segment.start + (span * (i + 1)) / Math.max(1, tokens.length),
+        confidence: 0.72,
+      }));
+    });
   const words = timedWords?.map((w) => ({ text: w.word, start: w.start, end: w.end, confidence: w.confidence ?? 0.92 }));
 
   return { text: data.text, words };
@@ -448,7 +584,7 @@ export async function cleanupDisplayText(sentences: string[]): Promise<string[]>
   const prompt = JSON.stringify(sentences);
 
   try {
-    if (isAgentRouter() || env.model.includes("sol") || env.model.includes("astra")) {
+    if (isAgentRouter()) {
       const raw = await sendAgentRouterRequest({
         systemInstruction: sys,
         prompt,
@@ -466,6 +602,7 @@ export async function cleanupDisplayText(sentences: string[]): Promise<string[]>
 
     const client = getClient();
     if (!client) return sentences;
+    console.log(`[ASR Cleanup] Calling ${getEffectiveBaseURL()} with model ${env.model}`);
     const res = await client.chat.completions.create({
       model: env.model,
       messages: [
@@ -475,7 +612,9 @@ export async function cleanupDisplayText(sentences: string[]): Promise<string[]>
       response_format: { type: "json_object" },
       temperature: 0.2,
     });
-    const parsed = JSON.parse(res.choices[0].message.content || "{}");
+    const msg = res.choices[0]?.message as any;
+    const rawContent = msg?.content || msg?.reasoning_content || "{}";
+    const parsed = JSON.parse(rawContent);
     if (Array.isArray(parsed.cleaned) && parsed.cleaned.length === sentences.length) return parsed.cleaned;
     return sentences;
   } catch {
@@ -605,33 +744,123 @@ async function structured<T>(
 
   const model = options.model ?? env.model;
 
-  if (isAgentRouter() || model.includes("sol") || model.includes("astra")) {
+  if (isAgentRouter()) {
     const raw = await sendAgentRouterRequest({
       model,
       systemInstruction: system,
       prompt,
       responseJsonSchema: schema.schema,
       temperature: null,
-      maxOutputTokens: options.maxTokens ?? 16000,
+      maxOutputTokens: options.maxTokens ?? env.maxOutputTokens ?? 32768,
+      maxAttempts: 5,
     });
     return parseJsonOutput<T>(raw);
   }
 
   const client = getClient();
   if (!client) throw new Error("OpenAI client initialization failed.");
-  const response = await client.chat.completions.create({
-    model,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: prompt },
-    ],
-    response_format: { type: "json_schema", json_schema: schema as never },
-    temperature: options.temperature ?? 0.55,
-    max_tokens: options.maxTokens ?? 6000,
-  });
-  const content = response.choices[0]?.message?.content;
-  if (!content) throw new Error("The model returned an empty structured response.");
-  return parseJsonOutput<T>(content);
+
+  // Respect requested options.maxTokens or env.maxOutputTokens without artificial downward clamps
+  const requestedCap = Math.max(options.maxTokens ?? 0, env.maxOutputTokens ?? 0) || 32768;
+  let currentMaxTokens = Math.max(8192, requestedCap);
+  let lastError: Error | null = null;
+  let lastRawOutput = "";
+
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      console.log(`[Structured Request] Calling ${getEffectiveBaseURL()} with model ${model} (${schema.name}) attempt ${attempt}/4 with max_tokens=${currentMaxTokens}`);
+
+      // If previous attempt returned invalid JSON or malformed response, send it right back with fix instructions!
+      let userPrompt = prompt;
+      if (attempt > 1 && lastError) {
+        console.warn(`[Structured Request] Attempt ${attempt - 1} produced invalid output. Sending repair request to model...`);
+        userPrompt = `${prompt}
+
+[CRITICAL INSTRUCTION - PREVIOUS ATTEMPT FAILED WITH INVALID JSON]:
+Your previous attempt failed with error: ${lastError.message}
+${lastRawOutput ? `Your previous output began with: ${lastRawOutput.slice(0, 250)}...` : ""}
+
+YOU MUST FIX THIS NOW:
+1. Return ONLY valid, complete JSON matching the required schema.
+2. The response MUST start with '{' and end with '}'.
+3. Do NOT include ANY chain-of-thought, thinking, reasoning, explanation, or conversational markdown outside the JSON.
+4. Ensure all brackets, braces, and quotes are closed and strictly valid JSON syntax.`;
+      }
+
+      let content: string | null | undefined;
+      try {
+        const stream = await client.chat.completions.create({
+          model,
+          messages: [
+            { role: "system", content: `${system}\n\n[DIRECTIVE: Output strictly valid JSON. Start with { and end with }.]` },
+            { role: "user", content: userPrompt },
+          ],
+          response_format: { type: "json_schema", json_schema: schema as never },
+          temperature: attempt === 1 ? (options.temperature ?? 0.55) : 0.2,
+          max_tokens: currentMaxTokens,
+          stream: true,
+        });
+        let streamedContent = "";
+        let streamedReasoning = "";
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta as any;
+          if (delta?.content) streamedContent += delta.content;
+          if (delta?.reasoning_content) streamedReasoning += delta.reasoning_content;
+        }
+        content = streamedContent || streamedReasoning;
+      } catch (schemaErr) {
+        const schemaErrMsg = (schemaErr as Error).message || "";
+        // If the provider doesn't support json_schema, fallback to json_object
+        if (/response_format|json_schema|unsupported|not supported|schema/i.test(schemaErrMsg)) {
+          console.log(`[Structured Request] json_schema rejected, falling back to json_object on ${getEffectiveBaseURL()}`);
+          const stream = await client.chat.completions.create({
+            model,
+            messages: [
+              { role: "system", content: `${system}\n\nSTRICT JSON CONTRACT: Return ONLY valid JSON matching this schema:\n${JSON.stringify(schema.schema)}` },
+              { role: "user", content: userPrompt },
+            ],
+            response_format: { type: "json_object" },
+            temperature: attempt === 1 ? (options.temperature ?? 0.55) : 0.2,
+            max_tokens: currentMaxTokens,
+            stream: true,
+          });
+          let streamedContent = "";
+          let streamedReasoning = "";
+          for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta as any;
+            if (delta?.content) streamedContent += delta.content;
+            if (delta?.reasoning_content) streamedReasoning += delta.reasoning_content;
+          }
+          content = streamedContent || streamedReasoning;
+        } else {
+          throw schemaErr;
+        }
+      }
+
+      if (!content || !content.trim()) {
+        throw new Error("The model returned an empty response.");
+      }
+
+      lastRawOutput = content;
+      return parseJsonOutput<T>(content);
+    } catch (err) {
+      lastError = err as Error;
+      const msg = lastError.message || "";
+      const isRateLimit = /rate limit|quota|429/i.test(msg);
+
+      // Bump token headroom on retry in case truncation caused invalid JSON (never clamp down to 10k)
+      currentMaxTokens = Math.min(100000, currentMaxTokens + 8000);
+
+      if (attempt < 4) {
+        const wait = isRateLimit ? 5000 * attempt : 1500 * attempt;
+        console.warn(`[Structured Request] Attempt ${attempt} failed (${msg.slice(0, 100)}). Retrying with fix instructions in ${wait}ms...`);
+        await sleep(wait);
+        continue;
+      }
+      throw new Error(`Model structured response failed after 4 attempts: ${msg}\nOutput snippet: ${lastRawOutput.slice(0, 300)}`);
+    }
+  }
+  throw new Error("Failed to receive structured response.");
 }
 
 const wordTable = (words: WordCue[]) =>
@@ -652,6 +881,7 @@ export interface PlanWindow {
   trailingFamilies: string[];
   /** How many dark shots this window may use. */
   darkBudget: number;
+  totalFilmSeconds?: number;
 }
 
 /** Stage 2: map every sentence to original, word-aligned visual storytelling. */
@@ -666,37 +896,42 @@ export async function planCreativeFilm(args: {
 }): Promise<CreativePlanOutput> {
   const system = `You are the CREATIVE DIRECTOR and MOTION GRAPHICS SUPERVISOR for a bespoke Remotion 2D animated film (1920x1080 @ 60fps).
 
-PRIMARY VISUAL AESTHETIC — HIGH-END 2D TECH MOTION DESIGN:
-The visual standard is modern, broadcast-grade 2D animated graphics inspired by high-profile tech keynotes, clean product launch videos, and the demo reel:
-- Sleek floating comparison cards (light and dark themed panels, rounded corners, subtle diffuse shadows, slight 2° tilt, brand/model badges, context/pricing stats, and animated callout focus frames).
-- Clean data storytelling (animated SVG line charts with gradient fills and peak pins, ranked bar comparisons growing with spring physics, percentage donut ratios).
-- Connected architecture meshes (clean service/pipeline node badges connected by curved bezier paths with glowing traveling data pulses).
-- Bento metric clusters & spec slabs (structured 2-4 card grids with tabular numerals, rolling odometers, and status pills).
-- Kinetic typography heroes (bold editorial statements, word-synced animated reveals with serif italic accents, expanding capsule highlights).
-- Query & inspection traces (search bar/terminal query typing itself out, cascading ranked result cards with score tags, table magnifier focus).
+PRIMARY VISUAL AESTHETIC — FAST, BROADCAST-GRADE 2D TECH MOTION DESIGN:
+Benchmark your direction against Apple/OpenAI keynote motion graphics and the demo reel:
+- Every single scene MUST feature a LARGE, PROMINENT ANIMATED VISUAL COMPONENT occupying 65% to 85% of the 1920x1080 canvas.
+- Text is supporting copy ONLY (a compact 1-line headline + kicker at top-left). Scenes that are just text, headlines, paragraphs, or word highlights are STRICTLY FORBIDDEN.
+- Animation is FAST and punchy: components slam, expand, or spring into frame starting at frame 2–6 (within 0.1s), with snappy spring physics (stiffness: 160, damping: 14) and fast item staggers (4–6 frames).
 
-CRITICAL DIRECTIVE — ANTI-ILLUSTRATION RULE:
-DO NOT attempt to generate literal figurative illustrations or complex physical sketches:
-- STRICTLY FORBIDDEN: Human body outlines, anatomical drawings, limb schematics, or faces.
-- STRICTLY FORBIDDEN: Mechanical sketches of robotic arms, gears, propulsion backpacks, physical vehicles, or machinery drawn with raw SVG paths.
-Complex figurative drawings look messy, distorted, and amateurish. Motion graphics communicate through clean, geometric 2D graphic layouts: floating cards, metric slabs, callout highlight boxes, typography, charts, and node graphs.
+DYNAMIC SCENE COUNT & PACING:
+- Shot count MUST scale with the audio duration:
+  - ~30 seconds of audio -> 3 to 5 scenes
+  - ~60 seconds (1 min) -> 6 to 9 scenes
+  - ~120 seconds (2 mins) -> 12 to 16 scenes
+  - ~240 seconds (4 mins) -> 22 to 28 scenes
+  - ~480 seconds (8 mins) -> 45 to 55 scenes
+- Target 6 to 12 seconds per scene for fast, punchy pacing (never drag a single scene beyond 15s unless it's a single long sentence).
+- Never fix or clamp the shot count to a static preset; let the speech duration and sentence flow decide the number of scenes.
 
-VISUAL FAMILIES (Plan diverse 2D motion graphics across these 5 disciplines):
-1. 'editorial': Bold kinetic typography slam, expanding capsule pill with rolling numerals, high-contrast dark impact resolution.
-2. 'photo' (Comparison/Contrast): Sleek floating UI cards (e.g. comparing two models, pricing tiers, or options with badges, context limits, and vibrant orange/coral callout focus frames).
-3. 'data': Animated line/area charts with glowing strokes, ranked bar comparisons that grow into place, or bento metric grids.
-4. 'mesh': Connected node architecture (e.g., pipeline stages, services, models) linked by animated curved connector lines with pulsing packets.
-5. 'investigation': Search query typing out with cascading result cards, or data table with an animated magnifier lens/callout frame locking onto the key row.
+MANDATORY HERO COMPONENT ARCHETYPES (You must plan one for every shot's 'visualIdea'):
+1. [Comparison Cards]: 2 large floating panels (light vs dark, width: 700px, height: 420px each) comparing models, pricing, or options with brand badges, metric rows, and an animated coral/orange callout focus frame (<mg.FocusFrame>).
+2. [Ranked Bar Comparison]: Drawn baseline line with 3-4 thick vertical bars shooting up with spring physics, rolling numbers atop each bar, and winner singled out with accent glow.
+3. [SVG Line Chart Story]: 1400px wide area/line trend chart with grid lines, gradient underfill, trim-path stroke reveal (<mg.Stroke>), and peak callout pin with rolling numeral.
+4. [Connected Node Mesh]: 6-8 system/pipeline node pills linked by curved bezier lines with glowing traveling pulse packets and sonar pulse rings.
+5. [Bento Metric Grid]: 3-4 structured large metric slabs filling the frame with rolling counters (<mg.Roll>), percentage rings, and status tags.
+6. [Query & Inspection Trace]: Search/terminal input typing out query character-by-character with 3-4 cascading result cards with confidence scores, or data table with floating magnifier reticle.
+7. [Stat Slab & Capsule]: Expanding capsule pill with rolling odometer (<mg.Roll>) and giant 800px ghost background numeral.
+
+ANTI-ILLUSTRATION RULE:
+DO NOT attempt literal figurative illustrations or complex physical sketches (no human bodies/anatomy, no robotic arms, no propulsion backpacks). Motion graphics communicate through clean 2D visual structures: cards, metric slabs, callout highlight boxes, typography, charts, and node graphs.
 
 WORD ALIGNMENT IS SACRED:
 The provided word list has global integer frame starts, spoken ends, pause frames, and ASR confidence. Use those global word indices for emphasis. Never invent or rewrite the spoken transcript. Never output float timestamps. Shot boundaries are sentence indices only; the runtime derives all frame times.
 
 NARRATIVE RULES:
 - All sentences covered exactly once, in order, without overlap or gaps.
-- Shot length follows content: normally 8-15 seconds per shot.
 - Diverse visual families across the acts.
 - No adjacent repeat of the same visualFamily; no more than 2 consecutive shots from the same family.
-- Every shot must contain a distinct, transcript-grounded 2D motion graphic layout.`;
+- Every shot's 'visualIdea' MUST state the component archetype and what large animated visual component is shown.`;
 
   const w = args.window;
   const first = w ? w.sentenceStart : 0;
@@ -706,13 +941,13 @@ NARRATIVE RULES:
 THIS IS PART ${w.index + 1} OF ${w.total} OF A LONGER FILM.
 Cover ONLY sentences ${first} through ${last} (inclusive). Do not plan sentences outside this range.
 ${w.lockedStyle
-  ? `The film's style is already locked by part 1 — REUSE IT EXACTLY in your returned fields:
+      ? `The film's style is already locked by part 1 — REUSE IT EXACTLY in your returned fields:
   northStar: ${w.lockedStyle.northStar}
   palette: ${w.lockedStyle.palette}
   typography: ${w.lockedStyle.typography}
   texture: ${w.lockedStyle.texture}
   continuityRules: ${w.lockedStyle.continuityRules.join("; ")}`
-  : "You are part 1: establish the palette, typography, texture and continuity rules the whole film will inherit."}
+      : "You are part 1: establish the palette, typography, texture and continuity rules the whole film will inherit."}
 Visual ideas already used earlier (do NOT repeat them, keep escalating):
 ${w.previousShotSummaries.slice(-14).map((s) => `  - ${s}`).join("\n") || "  - none yet"}
 Families of the shots immediately before this part: ${w.trailingFamilies.join(" → ") || "none"} — your first shot must not extend a run of 2.
@@ -720,22 +955,25 @@ Dark-theme shots allowed in THIS part: ${w.darkBudget}.
 `
     : "";
 
-  const prompt = `${args.repairErrors?.length ? `REPAIR THE PREVIOUS PLAN. Fix these exact issues:\n${args.repairErrors.join("\n")}\n\n` : ""}Audio duration: ${(args.durationFrames / 60).toFixed(3)}s (${args.durationFrames} frames at 60fps).
+  const partDurationSec = (args.durationFrames / 60).toFixed(1);
+  const totalFilmSec = (w?.totalFilmSeconds ?? args.durationFrames / 60).toFixed(1);
+  const durationText = w
+    ? `Part ${w.index + 1} of ${w.total}: speech duration ${partDurationSec}s (Total film: ${totalFilmSec}s).`
+    : `Audio duration: ${partDurationSec}s (${args.durationFrames} frames at 60fps).`;
+
+  const prompt = `${args.repairErrors?.length ? `REPAIR THE PREVIOUS PLAN. Fix these exact issues:\n${args.repairErrors.join("\n")}\n\n` : ""}${durationText}
 USER CREATIVE BRIEF (honor unless it conflicts with transcript truth): ${args.creativeBrief || "No extra direction; invent the most apt visual treatment from the narration."}
 Reference finish guidance (inspiration only, do not reproduce): ${args.referenceStyle}
 ${windowBrief}
-SENTENCE DIGEST (the only legal shot-boundary source):
+SENTENCE DIGEST (the only legal shot-boundary source; use words:start..end ranges for emphasisWordIndices):
 ${args.transcriptDigest.join("\n")}
-
-WORD CUES for this range (indexes are authoritative, frames are global):
-${wordTable(args.words)}
 
 Return a complete storyboard for sentences ${first}..${last}. Use each of those sentences exactly once, contiguous and in order, starting at sentenceStartIndex ${first} and ending at sentenceEndIndex ${last}. Let the content decide how many shots that needs.`;
 
   // Output budget scales with the range so long films are never truncated mid-plan.
   const sentenceCount = last - first + 1;
   const estimatedShots = Math.max(2, Math.ceil(sentenceCount / 1.4));
-  const maxTokens = Math.min(16000, 1200 + estimatedShots * 460);
+  const maxTokens = Math.min(100000, 40000 + estimatedShots * 400);
 
   return structured<CreativePlanOutput>(CREATIVE_PLAN_SCHEMA, system, prompt, {
     model: getEnv().plannerModel || getEnv().model,
@@ -755,18 +993,29 @@ export async function generateShotVisualPrompt(args: {
 }): Promise<ShotVisualPrompt> {
   const system = `You are a senior motion-graphics art director writing one precise visual construction prompt for a Remotion 2D animator.
 
-AESTHETIC: Clean, broadcast-quality 2D motion graphics (1920x1080 @ 60fps).
-Describe concrete 2D graphic elements:
-- Floating comparison cards (light and dark cards, rounded corners, soft diffuse shadows, slight 2-3° tilt, brand badges, and inner metric tiles).
-- Animated callout focus frames (vibrant coral/orange #FF5500 bounding box that pops or draws around the key metric/input price box).
-- Typography layout (bold statement, kicker, tabular numbers, word-by-word reveal timing).
-- Data graphs (animated SVG line stroke, ranked comparison bars, bento grid blocks, or connected node pills with traveling pulses).
-- Subtle dark/light grid canvas background and gentle camera push.
+AESTHETIC: Fast, broadcast-quality 2D motion graphics (1920x1080 @ 60fps).
+
+MANDATORY HERO COMPONENT (NO TEXT-ONLY SCENES):
+- The scene MUST be dominated by a LARGE ANIMATED VISUAL COMPONENT filling 65% to 85% of the 1920x1080 comp.
+- Text is kept compact at top-left (e.g. <mg.Heading kicker='...' title='...' frameAt={2} style={{ position: 'absolute', left: 100, top: 70 }} />).
+- Specify the exact large component architecture, dimensions, and layout:
+  - e.g., "Two 720x420px floating comparison cards tilted -2° and +2° with metric tiles and an animated coral focus frame"
+  - e.g., "1400x520px ranked bar chart with 3 bars shooting up from a baseline with glowing winner spotlight"
+  - e.g., "1400x500px SVG line chart with gradient underfill, pen path, and peak callout"
+  - e.g., "1500x550px 8-node connected network mesh with curved bezier lines and traveling pulse packets"
+  - e.g., "1400x620px 3-block bento metric grid with rolling numbers and status tags"
+  - e.g., "Terminal search bar typing out query with 3 cascading result cards"
+
+FAST ANIMATION TIMING (From Demo Reel):
+- Frame 2–6: Hero component starts entering immediately with snappy spring physics (stiffness: 160, damping: 14).
+- Frame 8–18: Internal tiles, bars, or nodes reveal with quick 4-frame staggers.
+- Frame 16–26: Focus callout frame (<mg.FocusFrame>) or winner highlight pops around the key metric.
+- Continuous: Subtle camera push (<mg.CameraRig zoom={1.03}>) and traveling pulses.
 
 CRITICAL CONSTRAINT:
-DO NOT describe human anatomy, body silhouettes, mechanical robots, robotic arms, propulsion packs, or physical machinery sketches. Focus entirely on clean 2D graphic design: cards, stat tiles, callout frames, charts, typography, and node graphs.
+DO NOT describe human anatomy, body silhouettes, mechanical robots, robotic arms, or physical sketches. Focus entirely on large 2D graphic components: cards, stat slabs, callout frames, charts, typography, and node graphs.
 
-Tie animation events to the provided local word indexes. All important motion reveals must complete by the cue's spokenEndFrame. The prompt is an instruction for a developer authoring clean Remotion React/SVG code.`;
+Tie animation events to the provided local word indexes. All important motion reveals must complete by the cue's spokenEndFrame.`;
   const prompt = `FILM NORTH STAR: ${args.filmNorthStar}
 CONTINUITY RULES: ${args.continuityRules.join("; ")}
 PREVIOUS SHOT VISUAL (avoid copying): ${args.previousSummary || "opening shot"}
@@ -779,7 +1028,10 @@ EXACT LOCAL WORD CUES (local frames; 60fps):
 ${wordTable(args.wordCues)}
 
 Write a render-ready prompt detailed enough that another model can independently code the scene without guessing.`;
-  return structured<ShotVisualPrompt>(VISUAL_PROMPT_SCHEMA, system, prompt, { temperature: 0.45, maxTokens: 4500 });
+  return structured<ShotVisualPrompt>(VISUAL_PROMPT_SCHEMA, system, prompt, {
+    temperature: 0.45,
+    maxTokens: 8192,
+  });
 }
 
 /** Stage 4 worker: generate a distinct, complete Remotion composition for one shot. */
@@ -796,15 +1048,55 @@ export async function generateRemotionShotCode(args: {
   const system = `You are an elite motion-graphics engineer and Remotion/React developer.
 You author bespoke, high-precision TSX Remotion shot components for a 1920x1080 @ 60fps video engine.
 
-VISUAL STANDARD — HIGH-END 2D TECH MOTION GRAPHICS:
-Your output must look like a scene from an Apple/OpenAI keynote or premium broadcast motion graphics reel:
-- Clean 2D graphic design: floating cards with rounded corners (borderRadius: 20-24), subtle borders, diffuse drop shadows, and subtle 2-3° tilt.
-- Metric tiles: inner rounded boxes with small uppercase labels (letterSpacing: "0.15em") and bold tabular numbers.
-- Animated callout focus frames (e.g. <mg.FocusFrame frameAt={20} color="#FF5500" borderRadius={14}> or styled border boxes) highlighting key values, pricing, or differences when the corresponding word is spoken.
-- Subtle grid background: <mg.GridBackground mode="dark" /> or subtle SVG grid lines/dots on dark (#0B0D13) or light canvas.
-- Staggered spring animations: cards slide up and scale in, followed by inner metric reveals, word sync, and callout focus pops.
-- Data charts and bars: smooth SVG paths with <mg.Stroke> or spring-animated horizontal/vertical bar fills.
-- Connected systems: rounded node badges with curved bezier paths and glowing pulse dots.
+VISUAL STANDARD — FAST, BROADCAST-GRADE 2D TECH MOTION GRAPHICS:
+Your output must look like a scene from an Apple/OpenAI keynote or the demo reel:
+
+1. MANDATORY HERO COMPONENT (STRICT ANTI-TEXT-ONLY RULE):
+   - A scene that is just <h1>, <p>, or <mg.WordCue> text with a background is a COMPLETE FAILURE.
+   - 65% to 85% of the 1920x1080 screen MUST be occupied by a LARGE, ANIMATED VISUAL COMPONENT.
+   - Text is strictly for a compact top-left heading: <mg.Heading kicker="..." title="..." frameAt={2} style={{ position: "absolute", left: 100, top: 70, maxWidth: 1100 }} />.
+   - The entire center and bottom of the comp (y: 200 to 1000) belongs to the hero component!
+
+2. FAST ANIMATION TIMING (From the Reference Demo Reel):
+   - Components enter FAST: animation starts at frame 2 to 6 (no waiting).
+   - Snappy spring physics: spring({ frame: frame - delay, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } }).
+   - Fast item staggers: 4 to 6 frames between cards/bars/nodes.
+   - Focus callouts: <mg.FocusFrame frameAt={18} color="#FF5500" borderRadius={16}> popping around key metrics with spring physics.
+   - Smooth continuous camera push: <mg.CameraRig zoom={interpolate(frame, [0, durationInFrames], [1, 1.04], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}>.
+
+3. CHOOSE AND BUILD ONE OF THESE 6 PROVEN DEMO COMPONENT ARCHETYPES:
+
+   ARCHETYPE A: DUAL COMPARISON CARDS (Image 2 & SplitComparison)
+   - Layout: Two large floating cards (<mg.Card width={700} height={420} tilt={-2} mode="light"> and <mg.Card width={700} height={420} tilt={2} mode="dark">) positioned side-by-side or overlapping at center (top: 260px).
+   - Content: Brand/product icon badge + title, micro-tags, row of 2-3 metric tiles (Context, Input, Output), and <mg.FocusFrame> around the winning metric!
+   - Animation: Card 1 springs in at frame 4, Card 2 springs in at frame 9, focus box pops at frame 18.
+
+   ARCHETYPE B: RANKED BAR COMPARISON (BarComparison from Demo)
+   - Layout: Baseline line drawn at y: 860 (<line x1={160} x2={1760} y1={860} y2={860} stroke="rgba(255,255,255,0.2)" strokeWidth={3} />).
+   - 3 to 4 massive bars (width: 240px, heights: 300-520px) shooting up from baseline:
+     const barH = spring({ frame: frame - (10 + i * 6), fps, config: { damping: 14, stiffness: 150 } }) * targetH;
+   - Bold number on top of each bar, label below baseline. Winner bar highlighted with accent color, glow, and side callout odometer.
+
+   ARCHETYPE C: SVG LINE CHART STORY (ChartStory from Demo)
+   - Layout: 1400x500px SVG chart centered at top: 280px. 4 horizontal grid lines with numbers.
+   - Path curve drawn with <mg.Stroke d="..." strokeWidth={6} color="#0066FF" durationFrames={36} />.
+   - Area fill gradient underneath with linearGradient.
+   - Glowing pen dot tracking current path head. Pinned callout pin at peak with <mg.Roll to={maxVal} />.
+
+   ARCHETYPE D: CONNECTED SYSTEM NETWORK (NetworkMesh from Demo)
+   - Layout: 6 to 8 node pills arranged in columns (e.g. Input, Planner, Workers, Validator) across 1500px width.
+   - Curved SVG bezier connector paths (<path d="M... C..." fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={3} />).
+   - Animated traveling pulse packets (<path d="..." stroke="#0066FF" strokeWidth={8} filter="url(#mgGlow)" strokeDasharray="0.08 2" strokeDashoffset={-((frame * 0.02) % 1)} />).
+   - Sonar pulse rings around active nodes.
+
+   ARCHETYPE E: BENTO METRIC GRID (BentoBadgeCluster from Demo)
+   - Layout: 3 to 4 large styled metric blocks filling the screen (e.g. 2 top cards width: 680px, 1 wide bottom card width: 1400px).
+   - Backgrounds in contrasting dark/light/accent colors, rounded corners (20px).
+   - Large rolling numerals (<mg.Roll fontSize={110} />), progress rings, uppercase label tags.
+
+   ARCHETYPE F: QUERY TRACE & TERMINAL (QueryTrace & MagnifierInspect from Demo)
+   - Layout: Search/terminal input box with animated typing query: query.slice(0, Math.floor(frame * 0.8)).
+   - 3 large cascading result cards (width: 1400px) flying in at frames 12, 18, 24 with confidence score bars and rank tags.
 
 CRITICAL ANTI-PATTERN:
 - STRICTLY FORBIDDEN: DO NOT draw human silhouettes, bodies, limbs, or faces.
@@ -831,12 +1123,14 @@ OUTPUT RULES & COMPILATION CONTRACT:
    - Never use CSS keyframe animations, CSS transitions, setTimeout, setInterval, Date, or Math.random (use Remotion random(seed)).
 
 4. AVAILABLE @frame60/mg PRIMITIVES:
-   - <mg.GridBackground mode="dark" /> : subtle grid lines on dark/light canvas
-   - <mg.FocusFrame frameAt={20} color="#FF5500" borderRadius={14}>{children}</mg.FocusFrame> : animated callout focus box (alias: <mg.Callout>)
+   - <mg.GridBackground mode="dark" /> : subtle grid lines on dark/light canvas (alias: <mg.Grid>)
+   - <mg.Heading kicker="category" title="Headline" frameAt={2} style={{ position: "absolute", left: 100, top: 70 }} />
+   - <mg.Card width={700} height={420} tilt={-2} mode="dark" frameAt={4}>{children}</mg.Card> : large floating UI card
+   - <mg.FocusFrame frameAt={18} color="#FF5500" borderRadius={16}>{children}</mg.FocusFrame> : animated callout focus box (alias: <mg.Callout>)
    - <mg.WordCue cue={cue} emphasis={boolean} emphasisColor="#0066FF">{cue.text}</mg.WordCue> : voice-synced word reveal with subtle rise and blur
    - <mg.CueProgress cue={cue} width={240} color="#0066FF" /> : progress bar synced to word spoken duration
    - <mg.Roll to={number} from={0} fontSize={90} color="#fff" /> : animated rolling numeral
-   - <mg.Stroke d="M..." width={w} height={h} color="#0066FF" durationFrames={45} /> : trim-path animated SVG path (alias: mg.Sweep)
+   - <mg.Stroke d="M..." width={w} height={h} color="#0066FF" durationFrames={36} /> : trim-path animated SVG path (alias: mg.Sweep)
    - <mg.CameraRig zoom={1.03} x={0} y={0}>{children}</mg.CameraRig> : camera pan/push container
    - <mg.ImpactLine text="Headline" frameAt={0} size={72} color="#fff" /> : bold kinetic text slam
    - <mg.Marker x={100} y={100} color="#0066FF" variant="cross" /> : architectural crosshair/dot marker
@@ -848,12 +1142,8 @@ OUTPUT RULES & COMPILATION CONTRACT:
    - Absolutely NO external URLs (no http:// or https:// image links; render all visuals with SVG paths, gradients, shapes, or typography).
    - Absolutely NO browser globals: no window, document, fetch, localStorage, WebSocket, eval.
 
-6. DESIGN & COMPOSITION RECIPES:
-   - Comparison Cards: Two floating cards (e.g. Card 1 white/light with model/product badge, Card 2 dark with competing model badge). Staggered entrance, subtle rotation (-2.5deg and +2deg), metric rows (context, input, output), and an animated coral/orange callout frame around the highlighted figure.
-   - Data & Bar Comparisons: Clean horizontal/vertical metric bars filling smoothly with spring physics, percentage tags, and stat callouts.
-   - Kinetic Hero: Giant typography slam with voice-synced <mg.WordCue> reveals and rolling count-up numbers.
-   - Connected Systems: Clean pill/box nodes connected with curved bezier lines and animated traveling pulse dots.
-   - Return clean, valid TypeScript JSX. No markdown backticks inside the sourceCode string property.`;
+6. RETURN FORMAT:
+   Return clean, valid TypeScript JSX. No markdown backticks inside the sourceCode string property.`;
   const prompt = `${args.validationError ? `RETRY ${args.retryNumber ?? 1}. The previous component failed validation. Fix the exact error below; keep the art direction, do not simplify to a template:\n${args.validationError}\n\n` : ""}FILM CONTINUITY KIT:
 ${JSON.stringify(args.filmContinuity, null, 2)}
 
@@ -872,6 +1162,6 @@ ${JSON.stringify(args.wordCues)}
 Return a fully authored Remotion TSX module in sourceCode. The visualSummary should describe the rendered composition (not the prompt); designChoices should list 3-6 distinctive visual decisions.`;
   return structured<GeneratedCodeOutput>(GENERATED_CODE_SCHEMA, system, prompt, {
     temperature: 0.2,
-    maxTokens: 7500,
+    maxTokens: 16384,
   });
 }

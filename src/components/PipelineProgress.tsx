@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PipelineLog } from "../services/projects";
-import { Check, ChevronRight, CircleDashed, LoaderCircle, TriangleAlert } from "lucide-react";
+import { Check, ChevronRight, CircleDashed, LoaderCircle, TriangleAlert, Play, RotateCcw } from "lucide-react";
 
 export type StageKey = "1_preprocessor" | "2_planner" | "3_art-direction" | "4_codegen" | "5_validator";
 
@@ -38,11 +38,17 @@ export function PipelineProgress({
   stageProgress,
   running,
   startedAt,
+  hasDraft: _hasDraft = false,
+  onContinue,
+  onStartFromStage,
 }: {
   logs: PipelineLog[];
   stageProgress: StageProgress | null;
   running: boolean;
   startedAt: number | null;
+  hasDraft?: boolean;
+  onContinue?: () => void;
+  onStartFromStage?: (stage: "audio-align" | "planning" | "art-direction" | "coding" | "validation") => void;
 }) {
   const [expanded, setExpanded] = useState<Set<StageKey>>(new Set());
   const [now, setNow] = useState(() => Date.now());
@@ -78,6 +84,7 @@ export function PipelineProgress({
 
   const statusOf = (key: StageKey): Status => {
     const entries = byStage.get(key) ?? [];
+    if (running && stageProgress && STAGES.find((s) => s.key === key)?.maps === stageProgress.stage) return "active";
     if (entries.some((e) => e.status === "error")) return "error";
     if (entries.some((e) => e.status === "success")) return "done";
     if (entries.length) return running ? "active" : "done";
@@ -87,7 +94,7 @@ export function PipelineProgress({
   const activeIndex = STAGES.findIndex((s) => statusOf(s.key) === "active");
   const doneCount = STAGES.filter((s) => statusOf(s.key) === "done").length;
   const overall = Math.round((doneCount / STAGES.length) * 100);
-  const hasError = STAGES.some((s) => statusOf(s.key) === "error");
+  const hasError = !running && STAGES.some((s) => statusOf(s.key) === "error");
 
   const toggle = (key: StageKey) =>
     setExpanded((old) => {
@@ -104,17 +111,26 @@ export function PipelineProgress({
       <header className="px-4 py-3 border-b border-[color:var(--color-border)] flex items-center gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-[color:var(--color-text)]">
-            {hasError ? "Generation stopped" : running ? "Building your film" : "Film ready"}
+            {running ? "Building your film" : hasError ? "Generation stopped" : "Film ready"}
           </h3>
           <p className="text-[11px] text-[color:var(--color-text-faint)] truncate">
-            {hasError
-              ? "Expand the failed stage to read the exact error."
-              : running
-                ? stageProgress?.message || "Working…"
+            {running
+              ? stageProgress?.message || "Working…"
+              : hasError
+                ? "Expand the failed stage to read the exact error or click Continue."
                 : `${STAGES.length} stages complete`}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-3">
+          {hasError && onContinue && !running && (
+            <button
+              onClick={onContinue}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm shadow-blue-500/20 transition-all cursor-pointer"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              Continue Generation
+            </button>
+          )}
           {startedAt && <span className="font-mono text-[11px] text-[color:var(--color-text-faint)] tabular-nums">{elapsedLabel((running ? now : logs.at(-1)?.timestamp ?? now) - startedAt)}</span>}
           <span className="font-mono text-[11px] text-[color:var(--color-text-soft)] tabular-nums">{overall}%</span>
         </div>
@@ -166,6 +182,87 @@ export function PipelineProgress({
                     <span className="block mt-2 h-1 rounded-full bg-[color:var(--color-surface-3)] overflow-hidden">
                       <span className="block h-full bg-blue-500 transition-all duration-300" style={{ width: `${Math.round((live.completed / Math.max(1, live.total)) * 100)}%` }} />
                     </span>
+                  )}
+
+                  {!running && (
+                    <div className="flex flex-wrap items-center gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
+                      {/* Continue button directly on the failed phase */}
+                      {status === "error" && onContinue && (
+                        <button
+                          type="button"
+                          onClick={onContinue}
+                          className="px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold flex items-center gap-1 shadow-sm transition-colors cursor-pointer"
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                          Continue from this step
+                        </button>
+                      )}
+
+                      {/* Stage 1: Read transcript & lock word timing */}
+                      {stage.key === "1_preprocessor" && onStartFromStage && (
+                        <button
+                          type="button"
+                          onClick={() => onStartFromStage("audio-align")}
+                          className="px-2.5 py-1 rounded bg-[color:var(--color-surface-2)] hover:bg-[color:var(--color-surface-3)] border border-[color:var(--color-border)] text-[10px] font-medium text-[color:var(--color-text-soft)] hover:text-[color:var(--color-text)] flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Re-run audio transcription and word-level alignment"
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          Restart word timing
+                        </button>
+                      )}
+
+                      {/* Stage 2: Plan what each spoken beat shows */}
+                      {stage.key === "2_planner" && onStartFromStage && (
+                        <button
+                          type="button"
+                          onClick={() => onStartFromStage("planning")}
+                          className="px-2.5 py-1 rounded bg-[color:var(--color-surface-2)] hover:bg-[color:var(--color-surface-3)] border border-[color:var(--color-border)] text-[10px] font-medium text-[color:var(--color-text-soft)] hover:text-[color:var(--color-text)] flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Start over and plan the storyboard beats from scratch"
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          Start over from planning
+                        </button>
+                      )}
+
+                      {/* Stage 3: Write the visual prompt per shot */}
+                      {stage.key === "3_art-direction" && onStartFromStage && (
+                        <button
+                          type="button"
+                          onClick={() => onStartFromStage("art-direction")}
+                          className="px-2.5 py-1 rounded bg-[color:var(--color-surface-2)] hover:bg-[color:var(--color-surface-3)] border border-[color:var(--color-border)] text-[10px] font-medium text-[color:var(--color-text-soft)] hover:text-[color:var(--color-text)] flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Re-author visual prompts for all shots, then re-generate code"
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          Start over from prompts
+                        </button>
+                      )}
+
+                      {/* Stage 4: Generate Remotion code */}
+                      {stage.key === "4_codegen" && onStartFromStage && (
+                        <button
+                          type="button"
+                          onClick={() => onStartFromStage("coding")}
+                          className="px-2.5 py-1 rounded bg-[color:var(--color-surface-2)] hover:bg-[color:var(--color-surface-3)] border border-[color:var(--color-border)] text-[10px] font-medium text-[color:var(--color-text-soft)] hover:text-[color:var(--color-text)] flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Keep storyboard and prompts, and re-write Remotion TSX code for all scenes"
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          Start over from code
+                        </button>
+                      )}
+
+                      {/* Stage 5: Compile & smoke-render */}
+                      {stage.key === "5_validator" && onStartFromStage && (
+                        <button
+                          type="button"
+                          onClick={() => onStartFromStage("validation")}
+                          className="px-2.5 py-1 rounded bg-[color:var(--color-surface-2)] hover:bg-[color:var(--color-surface-3)] border border-[color:var(--color-border)] text-[10px] font-medium text-[color:var(--color-text-soft)] hover:text-[color:var(--color-text)] flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Re-compile and verify all scenes without calling LLM"
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          Re-run validation & compile
+                        </button>
+                      )}
+                    </div>
                   )}
                 </span>
 

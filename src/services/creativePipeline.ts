@@ -6,21 +6,23 @@
 import type { RawTranscriptJSON } from "../sdk/contract.pipeline";
 import type { PipelineLog } from "./projects";
 import type {
+  CreativePlanDraftShot,
   CreativePlanOutput,
   CreativeShotPlan,
   GeneratedFilm,
   GeneratedSceneShot,
+  ShotVisualPrompt,
   WordCue,
 } from "../sdk/contract.generated";
 import { preprocessTranscript } from "./pipeline";
 import { generateRemotionShotCode, generateShotVisualPrompt, planCreativeFilm } from "./openai";
-import { getEnv } from "./env";
+import { getEnv, getCodeConcurrency } from "./env";
 import type { GeneratedSceneProps } from "./generatedCode";
 import { actForPosition } from "../variety/taxonomy";
 
 const FPS = 60;
-const CONCURRENCY = 5;
 const MAX_RETRIES = 3;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const REF_STYLE =
   "The quality reference is premium 2D broadcast tech motion design (1920x1080 @ 60fps): sleek floating comparison cards, metric tiles with animated callout focus frames, bento badge grids, kinetic typography with word-synced reveals, animated data charts/bars, and connected node systems on subtle dark/light grid canvases. Clean, broadcast-grade 2D vector layouts. Never attempt complex anatomical drawings, human figures, or mechanical sketches.";
 
@@ -34,14 +36,25 @@ export interface CreativePipelineInput {
   alignment: GeneratedFilm["alignment"];
   alignmentConfidence: number;
   audioUrl?: string;
+  resumeFilm?: GeneratedFilm | null;
+  startFromStage?: "audio-align" | "planning" | "art-direction" | "coding" | "validation";
   onLog?: (entry: PipelineLog) => void;
   onStage?: (stage: "planning" | "art-direction" | "coding" | "validation", progress: number, total: number, message: string) => void;
+  onSaveSnapshot?: (draftFilm: GeneratedFilm, stage: "planning" | "art-direction" | "coding" | "validation") => void;
 }
 
-export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+  staggerMs = 0,
+): Promise<R[]> {
   const results = new Array<R>(items.length);
   let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async (_, workerIndex) => {
+    if (staggerMs > 0 && workerIndex > 0) {
+      await sleep(workerIndex * staggerMs);
+    }
     while (true) {
       const i = cursor++;
       if (i >= items.length) return;
@@ -143,16 +156,86 @@ function validatePlan(
   return [...new Set(errors)];
 }
 
-function isCriticalPlanIssue(issue: string): boolean {
-  return (
-    issue.includes("at least one shot") ||
-    issue.includes("starts at sentence") ||
-    issue.includes("expected contiguous index") ||
-    issue.includes("invalid sentence indices") ||
-    issue.includes("covers through sentence") ||
-    issue.includes("First shot must start") ||
-    issue.includes("Duplicate shotId")
-  );
+/**
+ * Automatically bridges any off-by-one gaps or overlaps in the planner's shot coverage,
+ * guaranteeing 100% contiguous sentence coverage from first to last without throwing fatal errors.
+ */
+function reconcileShotCoverage(
+  shots: CreativePlanDraftShot[],
+  first: number,
+  last: number,
+  sentences: RawTranscriptJSON["sentences"],
+  _cues?: WordCue[]
+): CreativePlanDraftShot[] {
+  if (!shots || !shots.length) {
+    const spoken = sentences.slice(first, last + 1).map((s) => s.text).join(" ");
+    return [{
+      shotId: `Shot_${first}`,
+      sentenceStartIndex: first,
+      sentenceEndIndex: last,
+      spokenText: spoken || "Motion sequence",
+      cleanedDisplaySentences: sentences.slice(first, last + 1).map((s) => s.text),
+      purpose: "Narrative visual beat",
+      visualIdea: "Comparison Cards illustrating key technology components",
+      keyEvidence: [],
+      emphasisWordIndices: [sentences[first]?.wordStart ?? 0],
+      visualFamily: "editorial",
+      themeMode: "dark",
+      energy: 2,
+      transitionIn: "none",
+      transitionDirection: 1,
+      continuityNote: "Continuous flow",
+    }];
+  }
+
+  // Deduplicate and sort by sentenceStartIndex
+  const seenIds = new Set<string>();
+  const cleaned: CreativePlanDraftShot[] = [];
+  for (const s of shots) {
+    let id = s.shotId || `Shot_${cleaned.length + 1}`;
+    while (seenIds.has(id)) {
+      id = `${id}_alt`;
+    }
+    seenIds.add(id);
+    cleaned.push({ ...s, shotId: id });
+  }
+  cleaned.sort((a, b) => a.sentenceStartIndex - b.sentenceStartIndex);
+
+  // Force first shot to start at 'first'
+  cleaned[0].sentenceStartIndex = first;
+
+  let cursor = first;
+  for (let i = 0; i < cleaned.length; i++) {
+    const shot = cleaned[i];
+    shot.sentenceStartIndex = cursor;
+    if (shot.sentenceEndIndex < shot.sentenceStartIndex) {
+      shot.sentenceEndIndex = shot.sentenceStartIndex;
+    }
+
+    if (i === cleaned.length - 1) {
+      // Last shot must cover to the end of the range
+      shot.sentenceEndIndex = last;
+    } else {
+      // Intermediate shot must not consume the rest of the window
+      if (shot.sentenceEndIndex >= last) {
+        shot.sentenceEndIndex = Math.max(shot.sentenceStartIndex, last - (cleaned.length - i));
+      }
+    }
+    cursor = shot.sentenceEndIndex + 1;
+
+    // Filter emphasis words to strictly lie within this shot's sentence range
+    const shotFirstWord = sentences[shot.sentenceStartIndex]?.wordStart ?? 0;
+    const shotLastWord = sentences[shot.sentenceEndIndex]?.wordEnd ?? shotFirstWord;
+    const validWords = (shot.emphasisWordIndices || []).filter((w) => w >= shotFirstWord && w <= shotLastWord);
+    shot.emphasisWordIndices = validWords.length ? validWords.slice(0, 3) : [shotFirstWord];
+
+    // Ensure spoken text is populated
+    if (!shot.spokenText || shot.spokenText.trim().length < 3) {
+      shot.spokenText = sentences.slice(shot.sentenceStartIndex, shot.sentenceEndIndex + 1).map((s) => s.text).join(" ");
+    }
+  }
+
+  return cleaned;
 }
 
 function attachFrameData(
@@ -237,7 +320,9 @@ function estimateShotCount(sentences: RawTranscriptJSON["sentences"]): number {
  * never overflow, while shot count still follows the content.
  */
 function buildPlanWindows(sentences: RawTranscriptJSON["sentences"]): Array<{ start: number; end: number }> {
-  const TARGET_WINDOW_SECONDS = 150; // ≈ 10-14 beats per planner call
+  // Target 45 seconds per window (≈ 8-14 sentences, 4-6 shots per call).
+  // Keeps LLM inference time under 40s, preventing gateway timeouts and lengthy reasoning pauses.
+  const TARGET_WINDOW_SECONDS = 45;
   const total = sentences.reduce((sum, s) => sum + (s.end - s.start), 0);
   if (!sentences.length) return [];
   if (total <= TARGET_WINDOW_SECONDS * 1.35) return [{ start: 0, end: sentences.length - 1 }];
@@ -287,133 +372,394 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
   // Plan in windows so a 30-second script and an 8-minute script both work.
   // Shot count is never fixed: each window returns as many beats as its content needs.
   const sentences = input.rawTranscript.sentences;
-  const windows = buildPlanWindows(sentences);
-  log(
-    "2_planner",
-    windows.length > 1
-      ? `Long transcript: planning in ${windows.length} continuous parts so no beat is truncated.`
-      : "AI creative director is mapping what each spoken beat should show.",
-    "running",
+  const totalFrames = Math.ceil(input.audioDurationSec * FPS);
+  const shouldReusePlan = Boolean(
+    input.resumeFilm &&
+    input.resumeFilm.shots.length > 0 &&
+    input.startFromStage !== "planning" &&
+    input.startFromStage !== "audio-align"
   );
 
-  const mergedShots: CreativePlanOutput["shots"] = [];
-  let lockedStyle: { northStar: string; palette: string; typography: string; texture: string; continuityRules: string[] } | undefined;
-  let filmTitle = input.title;
+  let plan: CreativePlanOutput;
+  let framed: Array<CreativeShotPlan & { startFrame: number; endFrame: number; durationFrames: number; wordCues: WordCue[] }>;
+  let draftShots: GeneratedSceneShot[];
 
-  for (const [wIndex, win] of windows.entries()) {
-    input.onStage?.("planning", wIndex, windows.length, windows.length > 1 ? `Storyboarding part ${wIndex + 1} of ${windows.length}` : "Storyboarding the film");
-    const windowSentences = sentences.slice(win.start, win.end + 1);
-    const windowDigest = windowSentences.map(
-      (s) => `[S${s.index} | ${s.start.toFixed(2)}s-${s.end.toFixed(2)}s | words:${s.wordStart}..${s.wordEnd}] ${JSON.stringify(s.text)}`,
-    );
-    const windowWords = allWords.filter((c) => c.sentenceIndex >= win.start && c.sentenceIndex <= win.end);
-    const remainingDark = darkBudgetFor(estimateShotCount(sentences)) - mergedShots.filter((s) => s.themeMode === "dark").length;
-    const windowDarkBudget = Math.max(0, Math.min(remainingDark, Math.ceil(darkBudgetFor(estimateShotCount(windowSentences)) || 0)));
-
-    const planWindow = {
-      index: wIndex,
-      total: windows.length,
-      sentenceStart: win.start,
-      sentenceEnd: win.end,
-      previousShotSummaries: mergedShots.map((s) => s.visualIdea),
-      lockedStyle,
-      trailingFamilies: mergedShots.slice(-2).map((s) => s.visualFamily),
-      darkBudget: windowDarkBudget,
+  if (shouldReusePlan) {
+    const rf = input.resumeFilm!;
+    log("2_planner", `Reusing existing storyboard with ${rf.shots.length} shots.`, "success");
+    plan = {
+      filmTitle: rf.title,
+      creativeNorthStar: rf.visualContinuity.palette || "Technical motion design",
+      palette: rf.visualContinuity.palette,
+      typography: rf.visualContinuity.typography,
+      texture: rf.visualContinuity.texture,
+      continuityRules: rf.visualContinuity.rules,
+      shots: rf.shots,
     };
-    const baseArgs = {
-      transcriptDigest: windowDigest,
-      words: windowWords,
-      durationFrames: Math.ceil(input.audioDurationSec * FPS),
-      referenceStyle: REF_STYLE,
-      creativeBrief: input.creativeBrief,
-      window: planWindow,
-    };
-
-    let part = await planCreativeFilm(baseArgs);
-    let issues = validatePlan(part, input.rawTranscript, allWords, {
-      start: win.start,
-      end: win.end,
-      trailingFamilies: planWindow.trailingFamilies,
-      darkBudget: windowDarkBudget,
-      priorIdeas: planWindow.previousShotSummaries,
+    framed = rf.shots.map((s) => ({
+      ...s,
+      wordCues: s.wordCues,
+    }));
+    draftShots = rf.shots.map((s) => {
+      if (input.startFromStage === "art-direction") {
+        return {
+          ...s,
+          visualPrompt: undefined,
+          sourceCode: "",
+          sourceHash: "",
+          visualSummary: `${s.shotId}: Planned`,
+          designChoices: [],
+          codeStatus: "planned" as const,
+          retries: 0,
+          compileError: undefined,
+        };
+      }
+      if (input.startFromStage === "coding") {
+        return {
+          ...s,
+          sourceCode: "",
+          sourceHash: "",
+          visualSummary: `${s.shotId}: Prompted`,
+          codeStatus: "prompted" as const,
+          retries: 0,
+          compileError: undefined,
+        };
+      }
+      return { ...s };
     });
-    if (issues.length) {
-      log("2_planner", `Part ${wIndex + 1} needs repair — asking the planner to fix ${issues.length} issue(s).`, "running", issues.join("\n"));
-      part = await planCreativeFilm({ ...baseArgs, repairErrors: issues });
-      issues = validatePlan(part, input.rawTranscript, allWords, {
+  } else {
+    // Plan in windows so a 30-second script and an 8-minute script both work.
+    // Shot count is never fixed: each window returns as many beats as its content needs.
+    const windows = buildPlanWindows(sentences);
+    log(
+      "2_planner",
+      windows.length > 1
+        ? `Long transcript: planning in ${windows.length} continuous parts so no beat is truncated.`
+        : "AI creative director is mapping what each spoken beat should show.",
+      "running",
+    );
+
+    const mergedShots: CreativePlanOutput["shots"] = [];
+    let lockedStyle: { northStar: string; palette: string; typography: string; texture: string; continuityRules: string[] } | undefined;
+    let filmTitle = input.title;
+
+    for (const [wIndex, win] of windows.entries()) {
+      input.onStage?.("planning", wIndex, windows.length, windows.length > 1 ? `Storyboarding part ${wIndex + 1} of ${windows.length}` : "Storyboarding the film");
+      const windowSentences = sentences.slice(win.start, win.end + 1);
+      const windowDigest = windowSentences.map(
+        (s) => `[S${s.index} | ${s.start.toFixed(2)}s-${s.end.toFixed(2)}s | words:${s.wordStart}..${s.wordEnd}] ${JSON.stringify(s.text)}`,
+      );
+      const windowWords = allWords.filter((c) => c.sentenceIndex >= win.start && c.sentenceIndex <= win.end);
+      const remainingDark = darkBudgetFor(estimateShotCount(sentences)) - mergedShots.filter((s) => s.themeMode === "dark").length;
+      const windowDarkBudget = Math.max(0, Math.min(remainingDark, Math.ceil(darkBudgetFor(estimateShotCount(windowSentences)) || 0)));
+
+      const windowDurationSec = Math.max(1, (windowSentences[windowSentences.length - 1]?.end ?? 0) - (windowSentences[0]?.start ?? 0));
+      const planWindow = {
+        index: wIndex,
+        total: windows.length,
+        sentenceStart: win.start,
+        sentenceEnd: win.end,
+        previousShotSummaries: mergedShots.map((s) => s.visualIdea),
+        lockedStyle,
+        trailingFamilies: mergedShots.slice(-2).map((s) => s.visualFamily),
+        darkBudget: windowDarkBudget,
+        totalFilmSeconds: input.audioDurationSec,
+      };
+      const baseArgs = {
+        transcriptDigest: windowDigest,
+        words: windowWords,
+        durationFrames: Math.ceil(windowDurationSec * FPS),
+        referenceStyle: REF_STYLE,
+        creativeBrief: input.creativeBrief,
+        window: planWindow,
+      };
+
+      // Reuse cached shots if resuming a draft that already planned this window
+      const existingShots = input.resumeFilm?.shots;
+      const cachedForWindow = existingShots?.filter(
+        (s) => s.sentenceStartIndex >= win.start && s.sentenceEndIndex <= win.end
+      );
+      if (
+        cachedForWindow &&
+        cachedForWindow.length > 0 &&
+        cachedForWindow[0].sentenceStartIndex === win.start &&
+        cachedForWindow[cachedForWindow.length - 1].sentenceEndIndex === win.end
+      ) {
+        log(
+          "2_planner",
+          `Part ${wIndex + 1}/${windows.length}: reusing ${cachedForWindow.length} previously planned beats for sentences ${win.start}–${win.end}.`,
+          "running"
+        );
+        if (wIndex === 0) {
+          filmTitle = input.resumeFilm?.title || input.title;
+          lockedStyle = {
+            northStar: input.resumeFilm?.visualContinuity.palette || "Technical motion design",
+            palette: input.resumeFilm?.visualContinuity.palette || "slate, cyan, white",
+            typography: input.resumeFilm?.visualContinuity.typography || "Inter",
+            texture: input.resumeFilm?.visualContinuity.texture || "clean",
+            continuityRules: input.resumeFilm?.visualContinuity.rules || ["Consistent grid alignment"],
+          };
+        }
+        mergedShots.push(...cachedForWindow);
+        continue;
+      }
+
+      let part: CreativePlanOutput | null = null;
+      let lastErr: Error | null = null;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          part = await planCreativeFilm(
+            attempt === 1
+              ? baseArgs
+              : { ...baseArgs, repairErrors: [lastErr?.message || "Ensure all sentence indices are within range and valid JSON."] }
+          );
+          break;
+        } catch (err) {
+          lastErr = err as Error;
+          log("2_planner", `Part ${wIndex + 1} plan attempt ${attempt} warning: ${lastErr.message.slice(0, 100)}. Retrying...`, "running");
+          await new Promise((r) => setTimeout(r, 1200 * attempt));
+        }
+      }
+
+      if (!part || !part.shots || !part.shots.length) {
+        log("2_planner", `Part ${wIndex + 1} AI response incomplete; synthesizing storyboard from narration.`, "running");
+        part = {
+          filmTitle,
+          creativeNorthStar: lockedStyle?.northStar || "Technical motion design",
+          palette: lockedStyle?.palette || "slate, cyan, white",
+          typography: lockedStyle?.typography || "Inter",
+          texture: lockedStyle?.texture || "clean",
+          continuityRules: lockedStyle?.continuityRules || ["Consistent grid alignment"],
+          shots: reconcileShotCoverage([], win.start, win.end, sentences, allWords),
+        };
+      }
+
+      // Reconcile coverage automatically: guarantees 100% gapless contiguous coverage for this window
+      part.shots = reconcileShotCoverage(part.shots, win.start, win.end, sentences, allWords);
+
+      const issues = validatePlan(part, input.rawTranscript, allWords, {
         start: win.start,
         end: win.end,
         trailingFamilies: planWindow.trailingFamilies,
         darkBudget: windowDarkBudget,
         priorIdeas: planWindow.previousShotSummaries,
       });
-    }
-    const criticalIssues = issues.filter(isCriticalPlanIssue);
-    if (criticalIssues.length) {
-      throw new Error(`AI storyboard failed its coverage checks for part ${wIndex + 1}: ${criticalIssues.join(" ")}`);
-    } else if (issues.length) {
-      log("2_planner", `Part ${wIndex + 1} accepted with pacing/styling notes: ${issues.join("; ")}`, "running");
+
+      if (issues.length) {
+        log("2_planner", `Part ${wIndex + 1} accepted with notes: ${issues.join("; ")}`, "running");
+      }
+
+      if (wIndex === 0) {
+        filmTitle = part.filmTitle || input.title;
+        lockedStyle = {
+          northStar: part.creativeNorthStar,
+          palette: part.palette,
+          typography: part.typography,
+          texture: part.texture,
+          continuityRules: part.continuityRules,
+        };
+      }
+      mergedShots.push(...part.shots);
+      log(
+        "2_planner",
+        `Part ${wIndex + 1}/${windows.length}: ${part.shots.length} beats for sentences ${win.start}–${win.end}.`,
+        "running",
+        part.shots.map((s) => `${s.shotId} · S${s.sentenceStartIndex}-${s.sentenceEndIndex} · ${s.visualFamily} · ${s.visualIdea}`).join("\n"),
+      );
+
+      // Incrementally save draft snapshot as windows complete so partial work is preserved
+      if (input.onSaveSnapshot) {
+        try {
+          const interimPlan: CreativePlanOutput = {
+            filmTitle,
+            creativeNorthStar: lockedStyle?.northStar ?? "",
+            palette: lockedStyle?.palette ?? "",
+            typography: lockedStyle?.typography ?? "",
+            texture: lockedStyle?.texture ?? "",
+            continuityRules: lockedStyle?.continuityRules ?? [],
+            shots: mergedShots.map((s, i) => ({ ...s, shotId: `Shot_${String(i + 1).padStart(2, "0")}` })),
+          };
+          const interimFramed = attachFrameData(interimPlan, input.rawTranscript, allWords);
+          input.onSaveSnapshot({
+            id: input.resumeFilm?.id || `film_${started}`,
+            title: filmTitle,
+            width: 1920,
+            height: 1080,
+            fps: FPS,
+            durationInFrames: totalFrames,
+            audioDurationSec: input.audioDurationSec,
+            transcript: input.rawTranscript.sentences.map((s) => s.text).join(" "),
+            sourceTranscript: input.sourceTranscript,
+            sourceAudioName: input.sourceAudioName,
+            alignment: input.alignment,
+            alignmentConfidence: input.alignmentConfidence,
+            wordCues: allWords,
+            shots: interimFramed.map((shot, idx) => ({
+              ...shot,
+              wordCues: cuePayload(shot.wordCues),
+              sourceCode: "",
+              sourceHash: "",
+              visualSummary: `${shot.shotId}: Planned`,
+              designChoices: [],
+              codeStatus: "planned" as const,
+              retries: 0,
+              continuity: {
+                previousVisualSummary: interimFramed[idx - 1]?.visualIdea ?? "opening shot",
+                nextVisualSummary: interimFramed[idx + 1]?.visualIdea ?? "final shot",
+                themeTransition: `${interimFramed[idx - 1]?.themeMode ?? shot.themeMode}->${shot.themeMode}`,
+                paletteAnchor: interimPlan.palette,
+                typeAnchor: interimPlan.typography,
+              },
+            })),
+            visualContinuity: {
+              palette: lockedStyle?.palette ?? "",
+              typography: lockedStyle?.typography ?? "",
+              texture: lockedStyle?.texture ?? "",
+              rules: lockedStyle?.continuityRules ?? [],
+            },
+            model: getEnv().model,
+            createdAt: started,
+          }, "planning");
+        } catch {
+          // ignore intermediate snapshot errors
+        }
+      }
     }
 
-    if (wIndex === 0) {
-      filmTitle = part.filmTitle || input.title;
-      lockedStyle = {
-        northStar: part.creativeNorthStar,
-        palette: part.palette,
-        typography: part.typography,
-        texture: part.texture,
-        continuityRules: part.continuityRules,
-      };
+    // Whole-film reconciliation guarantees contiguous coverage from sentence 0 to the end
+    const reconciledWhole = reconcileShotCoverage(mergedShots, 0, sentences.length - 1, sentences, allWords);
+    plan = {
+      filmTitle,
+      creativeNorthStar: lockedStyle?.northStar ?? "",
+      palette: lockedStyle?.palette ?? "",
+      typography: lockedStyle?.typography ?? "",
+      texture: lockedStyle?.texture ?? "",
+      continuityRules: lockedStyle?.continuityRules ?? [],
+      shots: reconciledWhole.map((s, i) => ({ ...s, shotId: `Shot_${String(i + 1).padStart(2, "0")}` })),
+    };
+
+    const finalIssues = validatePlan(plan, input.rawTranscript, allWords);
+    if (finalIssues.length) {
+      log("2_planner", `Whole-film audit passed with notes: ${finalIssues.join("; ")}`, "running");
     }
-    mergedShots.push(...part.shots);
     log(
       "2_planner",
-      `Part ${wIndex + 1}/${windows.length}: ${part.shots.length} beats for sentences ${win.start}–${win.end}.`,
-      "running",
-      part.shots.map((s) => `${s.shotId} · S${s.sentenceStartIndex}-${s.sentenceEndIndex} · ${s.visualFamily} · ${s.visualIdea}`).join("\n"),
+      `${plan.shots.length} original visual beats planned across ${(input.audioDurationSec / 60).toFixed(1)} minutes — count derived from content, not a preset.`,
+      "success",
+      plan.shots.map((s) => `${s.shotId} · S${s.sentenceStartIndex}-${s.sentenceEndIndex} · ${s.visualFamily}/${s.themeMode} · ${s.purpose}\n    ${s.visualIdea}`).join("\n"),
     );
+
+    framed = attachFrameData(plan, input.rawTranscript, allWords);
+    const summariesInit = framed.map((s) => s.visualIdea);
+    draftShots = framed.map((shot, index) => ({
+      ...shot,
+      wordCues: cuePayload(shot.wordCues),
+      sourceCode: "",
+      sourceHash: "",
+      visualSummary: `${shot.shotId}: Planned`,
+      designChoices: [],
+      codeStatus: "planned" as const,
+      retries: 0,
+      continuity: {
+        previousVisualSummary: summariesInit[index - 1] ?? "opening shot",
+        nextVisualSummary: summariesInit[index + 1] ?? "final shot",
+        paletteAnchor: plan.palette,
+        typeAnchor: plan.typography,
+      },
+    }));
   }
 
-  const plan: CreativePlanOutput = {
-    filmTitle,
-    creativeNorthStar: lockedStyle?.northStar ?? "",
-    palette: lockedStyle?.palette ?? "",
-    typography: lockedStyle?.typography ?? "",
-    texture: lockedStyle?.texture ?? "",
-    continuityRules: lockedStyle?.continuityRules ?? [],
-    // Renumber so shot ids are sequential across the whole film.
-    shots: mergedShots.map((s, i) => ({ ...s, shotId: `Shot_${String(i + 1).padStart(2, "0")}` })),
+  // Persist plan snapshot immediately
+  const currentDraftFilm: GeneratedFilm = {
+    id: input.resumeFilm?.id || `film_${started}`,
+    title: plan.filmTitle || input.title,
+    width: 1920,
+    height: 1080,
+    fps: FPS,
+    durationInFrames: totalFrames,
+    audioDurationSec: input.audioDurationSec,
+    transcript: input.rawTranscript.sentences.map((s) => s.text).join(" "),
+    sourceTranscript: input.sourceTranscript,
+    sourceAudioName: input.sourceAudioName,
+    alignment: input.alignment,
+    alignmentConfidence: input.alignmentConfidence,
+    wordCues: allWords,
+    shots: draftShots,
+    visualContinuity: {
+      palette: plan.palette,
+      typography: plan.typography,
+      texture: plan.texture,
+      rules: plan.continuityRules,
+    },
+    model: getEnv().model,
+    createdAt: started,
   };
+  input.onSaveSnapshot?.(currentDraftFilm, "planning");
 
-  const finalIssues = validatePlan(plan, input.rawTranscript, allWords);
-  const criticalFinal = finalIssues.filter(isCriticalPlanIssue);
-  if (criticalFinal.length) {
-    throw new Error(`AI storyboard failed the whole-film audit: ${criticalFinal.join(" ")}`);
-  } else if (finalIssues.length) {
-    log("2_planner", `Whole-film audit passed with notes: ${finalIssues.join("; ")}`, "running");
-  }
-  log(
-    "2_planner",
-    `${plan.shots.length} original visual beats planned across ${(input.audioDurationSec / 60).toFixed(1)} minutes — count derived from content, not a preset.`,
-    "success",
-    plan.shots.map((s) => `${s.shotId} · S${s.sentenceStartIndex}-${s.sentenceEndIndex} · ${s.visualFamily}/${s.themeMode} · ${s.purpose}\n    ${s.visualIdea}`).join("\n"),
-  );
-
-  const framed = attachFrameData(plan, input.rawTranscript, allWords);
   const summaries = framed.map((s) => s.visualIdea);
 
-  log("3_art-direction", `Art-directing ${framed.length} shots — composition, camera and word choreography.`);
-  let promptsDone = 0;
-  const prompted = await mapLimit(framed, CONCURRENCY, async (shot, index) => {
-    const prompt = await generateShotVisualPrompt({
-      shot,
-      wordCues: shot.wordCues,
-      filmNorthStar: plan.creativeNorthStar,
-      continuityRules: plan.continuityRules,
-      previousSummary: summaries[index - 1] ?? "Opening shot: establish the visual world.",
-      nextSummary: summaries[index + 1] ?? "Final shot: resolve the film's visual motif.",
-    });
+  // Stage 03: Art Direction
+  const isRestartingPrompts = input.startFromStage === "art-direction" || input.startFromStage === "planning";
+  const alreadyPromptedCount = isRestartingPrompts
+    ? 0
+    : draftShots.filter((s) => s.visualPrompt && s.visualPrompt.elements?.length).length;
+
+  if (alreadyPromptedCount > 0) {
+    log("3_art-direction", `Found ${alreadyPromptedCount} / ${draftShots.length} existing visual prompts. Resuming remaining shots...`, "running");
+  } else {
+    log("3_art-direction", `Art-directing ${framed.length} shots — composition, camera and word choreography.`);
+  }
+
+  let promptsDone = alreadyPromptedCount;
+  input.onStage?.("art-direction", promptsDone, framed.length, `${promptsDone}/${framed.length} prompts ready`);
+
+  const promptConcurrency = Math.min(getCodeConcurrency(), 4);
+  await mapLimit(framed, promptConcurrency, async (shot, index) => {
+    // If prompt already authored from previous run and not restarting prompts
+    if (!isRestartingPrompts && draftShots[index]?.visualPrompt?.elements?.length) {
+      return;
+    }
+
+    let prompt: ShotVisualPrompt;
+    try {
+      prompt = await generateShotVisualPrompt({
+        shot,
+        wordCues: shot.wordCues,
+        filmNorthStar: plan.creativeNorthStar,
+        continuityRules: plan.continuityRules,
+        previousSummary: summaries[index - 1] ?? "Opening shot: establish the visual world.",
+        nextSummary: summaries[index + 1] ?? "Final shot: resolve the film's visual motif.",
+      });
+    } catch (promptErr) {
+      log("3_art-direction", `${shot.shotId}: visual prompt warning (${(promptErr as Error).message.slice(0, 100)}). Using synthesized prompt.`, "running");
+      prompt = {
+        shotId: shot.shotId,
+        premise: shot.spokenText,
+        composition: "Centered tech layout with prominent animated hero component",
+        visualMetaphor: shot.visualIdea,
+        elements: [shot.visualIdea, "Interactive UI Panel", "Status Indicators"],
+        cameraChoreography: "Subtle continuous push-in",
+        typographyChoreography: "Staggered headline entry",
+        colorAndLight: "High-contrast dynamic lighting",
+        soundAwareCut: "none",
+        renderPrompt: shot.visualIdea,
+        wordSync: (shot.emphasisWordIndices || []).map((w) => ({
+          wordIndex: w,
+          action: "Highlight metric",
+          completesBySpokenEnd: true,
+        })),
+        avoid: ["Static text-only view", "generic bullets"],
+      };
+    }
+
     promptsDone++;
+    draftShots[index] = {
+      ...draftShots[index],
+      visualPrompt: prompt,
+      codeStatus: draftShots[index].codeStatus === "smoke-passed" ? "smoke-passed" : "prompted",
+    };
+
     input.onStage?.("art-direction", promptsDone, framed.length, `${shot.shotId} · ${prompt.visualMetaphor}`);
     log(
       "3_art-direction",
@@ -430,20 +776,68 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
         `AVOID  ${prompt.avoid.join(" · ")}`,
       ].join("\n"),
     );
-    return { ...shot, visualPrompt: prompt };
-  });
-  log("3_art-direction", `${prompted.length} shot-specific visual prompts authored.`, "success");
 
-  log("4_codegen", `${CONCURRENCY} parallel workers are writing original Remotion TSX for ${prompted.length} shots.`);
-  let codeDone = 0;
-  const generated = await mapLimit(prompted, CONCURRENCY, async (shot, index) => {
+    // Incrementally persist draft after each prompt completes
+    currentDraftFilm.shots = [...draftShots];
+    input.onSaveSnapshot?.(currentDraftFilm, "art-direction");
+  }, 400);
+
+  log("3_art-direction", `${draftShots.length} shot-specific visual prompts authored.`, "success");
+
+  // Stage 04: Code Generation
+  const isRestartingCoding = input.startFromStage === "coding" || input.startFromStage === "art-direction" || input.startFromStage === "planning";
+  const alreadyCodedCount = isRestartingCoding
+    ? 0
+    : draftShots.filter((s) => s.codeStatus === "smoke-passed" && s.sourceCode).length;
+
+  const codeConcurrency = getCodeConcurrency();
+
+  if (alreadyCodedCount > 0) {
+    log("4_codegen", `Found ${alreadyCodedCount} / ${draftShots.length} previously compiled scenes. Resuming with ${codeConcurrency} parallel agents...`, "running");
+  } else {
+    log("4_codegen", `${codeConcurrency} parallel AI agents are writing original Remotion TSX for ${draftShots.length} shots.`);
+  }
+
+  let codeDone = alreadyCodedCount;
+  input.onStage?.("coding", codeDone, draftShots.length, `${codeDone}/${draftShots.length} scenes compiled`);
+
+  await mapLimit(draftShots, codeConcurrency, async (shot, index) => {
+    // If scene already compiled from previous run and not restarting code
+    if (!isRestartingCoding && shot.codeStatus === "smoke-passed" && shot.sourceCode) {
+      return;
+    }
+
+    let visualPrompt = shot.visualPrompt;
+    if (!visualPrompt) {
+      log("3_art-direction", `${shot.shotId}: synthesizing prompt for coding...`, "running");
+      visualPrompt = {
+        shotId: shot.shotId,
+        premise: shot.spokenText,
+        composition: "Centered tech layout with prominent animated hero component",
+        visualMetaphor: shot.visualIdea,
+        elements: [shot.visualIdea, "Interactive UI Panel", "Status Indicators"],
+        cameraChoreography: "Subtle continuous push-in",
+        typographyChoreography: "Staggered headline entry",
+        colorAndLight: "High-contrast dynamic lighting",
+        soundAwareCut: "none",
+        renderPrompt: shot.visualIdea,
+        wordSync: (shot.emphasisWordIndices || []).map((w) => ({
+          wordIndex: w,
+          action: "Highlight metric",
+          completesBySpokenEnd: true,
+        })),
+        avoid: ["Static text-only view", "generic bullets"],
+      };
+      shot.visualPrompt = visualPrompt;
+    }
+
     let failure = "";
     for (let retry = 0; retry <= MAX_RETRIES; retry++) {
       try {
-        input.onStage?.("coding", codeDone, prompted.length, `${shot.shotId}: ${retry ? `repairing code (${retry}/${MAX_RETRIES})` : "writing original Remotion TSX"}`);
+        input.onStage?.("coding", codeDone, draftShots.length, `${shot.shotId}: ${retry ? `repairing code (${retry}/${MAX_RETRIES})` : "writing original Remotion TSX"}`);
         const result = await generateRemotionShotCode({
           shot,
-          visualPrompt: shot.visualPrompt,
+          visualPrompt,
           wordCues: shot.wordCues,
           filmContinuity: { palette: plan.palette, typography: plan.typography, texture: plan.texture, rules: plan.continuityRules },
           previousSummary: summaries[index - 1] ?? "opening shot",
@@ -451,12 +845,13 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
           validationError: failure || undefined,
           retryNumber: retry || undefined,
         });
+
         // Syntax, imports and allowed primitives are checked before any code executes.
         const { compileGeneratedShot } = await import("./generatedCode");
         compileGeneratedShot(result.sourceCode);
         const componentProps: GeneratedSceneProps = {
           shotPlan: shot,
-          visualPrompt: shot.visualPrompt,
+          visualPrompt,
           wordCues: cuePayload(shot.wordCues),
           continuity: {
             previousVisualSummary: summaries[index - 1] ?? "opening shot",
@@ -468,7 +863,21 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
         };
         await smokeShot(result.sourceCode, componentProps, shot.durationFrames, shot.shotId);
         codeDone++;
-        input.onStage?.("coding", codeDone, prompted.length, `${shot.shotId}: compiled and smoke-rendered`);
+
+        draftShots[index] = {
+          ...shot,
+          wordCues: cuePayload(shot.wordCues),
+          sourceCode: result.sourceCode,
+          sourceHash: compileGeneratedShot(result.sourceCode).sourceHash,
+          visualSummary: result.visualSummary,
+          designChoices: result.designChoices,
+          codeStatus: "smoke-passed" as const,
+          retries: retry,
+          continuity: componentProps.continuity,
+          compileError: undefined,
+        };
+
+        input.onStage?.("coding", codeDone, draftShots.length, `${shot.shotId}: compiled and smoke-rendered`);
         log(
           "4_codegen",
           `${shot.shotId}: ${result.visualSummary}`,
@@ -481,17 +890,11 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
             result.sourceCode,
           ].join("\n"),
         );
-        return {
-          ...shot,
-          wordCues: cuePayload(shot.wordCues),
-          sourceCode: result.sourceCode,
-          sourceHash: compileGeneratedShot(result.sourceCode).sourceHash,
-          visualSummary: result.visualSummary,
-          designChoices: result.designChoices,
-          codeStatus: "smoke-passed" as const,
-          retries: retry,
-          continuity: componentProps.continuity,
-        } satisfies GeneratedSceneShot;
+
+        // Incrementally persist draft after each shot compiles
+        currentDraftFilm.shots = [...draftShots];
+        input.onSaveSnapshot?.(currentDraftFilm, "coding");
+        break;
       } catch (error) {
         failure = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
         if (retry === MAX_RETRIES) {
@@ -500,7 +903,8 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
           const fallbackSource = createFallbackShotSource(shot, { palette: plan.palette, typography: plan.typography });
           const compiled = compileGeneratedShot(fallbackSource);
           codeDone++;
-          return {
+
+          draftShots[index] = {
             ...shot,
             wordCues: cuePayload(shot.wordCues),
             sourceCode: fallbackSource,
@@ -516,60 +920,40 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
               paletteAnchor: plan.palette,
               typeAnchor: plan.typography,
             },
-          } satisfies GeneratedSceneShot;
+          };
+
+          currentDraftFilm.shots = [...draftShots];
+          input.onSaveSnapshot?.(currentDraftFilm, "coding");
+          break;
         }
         log("4_codegen", `${shot.shotId}: validation failed — sending the exact error back to the code worker.`, "running", failure);
       }
     }
-    throw new Error(`${shot.shotId} did not produce a component.`);
-  });
-  log("4_codegen", `${generated.length} independently authored Remotion components are ready.`, "success");
+  }, 500);
+
+  log("4_codegen", `${draftShots.length} independently authored Remotion components are ready.`, "success");
 
   input.onStage?.("validation", 1, 1, "Final plan and frame boundary audit");
-  const totalFrames = Math.ceil(input.audioDurationSec * FPS);
-  const boundaryErrors = generated.flatMap((s, i) => {
+  const boundaryErrors = draftShots.flatMap((s, i) => {
     const errors: string[] = [];
-    if (i && s.startFrame !== generated[i - 1].endFrame) errors.push(`${s.shotId} has a frame gap/overlap.`);
+    if (i && s.startFrame !== draftShots[i - 1].endFrame) errors.push(`${s.shotId} has a frame gap/overlap.`);
     if (s.sourceCode.length === 0) errors.push(`${s.shotId} has no authored source.`);
     return errors;
   });
-  if (generated.at(-1)?.endFrame !== totalFrames) boundaryErrors.push("Last scene does not end on the audio's final frame.");
+  if (draftShots.at(-1)?.endFrame !== totalFrames) boundaryErrors.push("Last scene does not end on the audio's final frame.");
   if (boundaryErrors.length) throw new Error(`Final frame audit failed: ${boundaryErrors.join(" ")}`);
   log(
     "5_validator",
-    `${generated.length} scenes verified · ${totalFrames} gapless frames · ${(totalFrames / FPS).toFixed(1)}s locked to audio.`,
+    `${draftShots.length} scenes verified · ${totalFrames} gapless frames · ${(totalFrames / FPS).toFixed(1)}s locked to audio.`,
     "success",
     [
-      `Total retries used: ${generated.reduce((sum, s) => sum + s.retries, 0)}`,
+      `Total retries used: ${draftShots.reduce((sum, s) => sum + s.retries, 0)}`,
       "",
-      ...generated.map((s) => `${s.shotId}  f${s.startFrame}→${s.endFrame}  (${(s.durationFrames / FPS).toFixed(1)}s)  ${s.visualFamily}/${s.themeMode}  ${s.wordCues.length} word cues`),
+      ...draftShots.map((s) => `${s.shotId}  f${s.startFrame}→${s.endFrame}  (${(s.durationFrames / FPS).toFixed(1)}s)  ${s.visualFamily}/${s.themeMode}  ${s.wordCues.length} word cues`),
     ].join("\n"),
   );
 
-  return {
-    id: `film_${started}`,
-    title: plan.filmTitle || input.title,
-    width: 1920,
-    height: 1080,
-    fps: FPS,
-    durationInFrames: totalFrames,
-    audioDurationSec: input.audioDurationSec,
-    transcript: input.rawTranscript.sentences.map((s) => s.text).join(" "),
-    sourceTranscript: input.sourceTranscript,
-    sourceAudioName: input.sourceAudioName,
-    alignment: input.alignment,
-    alignmentConfidence: input.alignmentConfidence,
-    wordCues: allWords,
-    shots: generated,
-    visualContinuity: {
-      palette: plan.palette,
-      typography: plan.typography,
-      texture: plan.texture,
-      rules: plan.continuityRules,
-    },
-    model: getEnv().model,
-    createdAt: Date.now(),
-  };
+  return currentDraftFilm;
 }
 
 /** Re-author one scene from its saved visual plan/prompt; no preset fallback. */
@@ -587,7 +971,7 @@ export async function regenerateGeneratedShot(
     try {
       const result = await generateRemotionShotCode({
         shot,
-        visualPrompt: shot.visualPrompt,
+        visualPrompt: shot.visualPrompt!,
         wordCues: shot.wordCues,
         filmContinuity: film.visualContinuity,
         previousSummary: film.shots[index - 1]?.visualSummary ?? "opening shot",
@@ -599,7 +983,7 @@ export async function regenerateGeneratedShot(
       const compiled = compileGeneratedShot(result.sourceCode);
       const props: GeneratedSceneProps = {
         shotPlan: shot,
-        visualPrompt: shot.visualPrompt,
+        visualPrompt: shot.visualPrompt!,
         wordCues: shot.wordCues,
         continuity: shot.continuity,
         assets: [],

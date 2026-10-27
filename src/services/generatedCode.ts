@@ -304,7 +304,7 @@ export function compileGeneratedShot(sourceCode: string): CompileResult {
  */
 export function createFallbackShotSource(
   shot: { shotId: string; spokenText?: string; cleanedDisplaySentences?: string[]; visualPrompt?: { visualMetaphor?: string; premise?: string } },
-  continuity?: { palette?: string; typography?: string }
+  _continuity?: { palette?: string; typography?: string }
 ): string {
   const headline = (shot.cleanedDisplaySentences?.[0] || shot.spokenText || "Visual Sequence").replace(/["\\]/g, "");
   const metaphor = (shot.visualPrompt?.visualMetaphor || shot.visualPrompt?.premise || "Voice-aligned motion sequence").replace(/["\\]/g, "");

@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project, PipelineLog } from "../services/projects";
-import { createProject, getProject, getProjects, loadAudioBlob, saveAudioBlob, updateProject, setActiveProjectId } from "../services/projects";
+import { createProject, getProjects, getProjectAsync, saveProjectToIDB, loadAudioBlob, saveAudioBlob, updateProject, setActiveProjectId } from "../services/projects";
 import { normalizeTranscriptJson, alignTranscriptWords } from "../services/transcript";
 import { textToRawTranscript } from "../services/pipeline";
 import { transcribeAudio } from "../services/openai";
@@ -13,7 +13,7 @@ import { runCreativePipeline, regenerateGeneratedShot } from "../services/creati
 import { GeneratedFilmPlayer } from "./GeneratedFilmPlayer";
 import { PipelineProgress, type StageProgress } from "./PipelineProgress";
 import type { GeneratedFilm } from "../sdk/contract.generated";
-import { AlertTriangle, FileText, Music, Sparkles, Upload, Wand2, Settings2, Clapperboard } from "lucide-react";
+import { AlertTriangle, FileText, Music, Sparkles, Upload, Download, Check, Wand2, Settings2, Clapperboard, Play } from "lucide-react";
 
 const FPS = 60;
 
@@ -40,6 +40,7 @@ export function Studio({
   const [stageProgress, setStageProgress] = useState<StageProgress | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [film, setFilm] = useState<GeneratedFilm | null>(null);
+  const [draftFilm, setDraftFilm] = useState<GeneratedFilm | null>(null);
   const [processing, setProcessing] = useState(false);
   const [aligning, setAligning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +60,7 @@ export function Studio({
         setTranscriptText("");
         setRawTranscript(null);
         setFilm(null);
+        setDraftFilm(null);
         setAudioFile(null);
         setAudioDuration(0);
         setPipelineLogs([]);
@@ -67,7 +69,7 @@ export function Studio({
         setAudioUrl(null);
         return;
       }
-      const p = getProject(activeProjectId) ?? getProjects().find((x) => x.id === activeProjectId) ?? null;
+      const p = (await getProjectAsync(activeProjectId)) ?? getProjects().find((x) => x.id === activeProjectId) ?? null;
       if (!p || !alive) return;
       setProject(p);
       setProjectTitle(p.title);
@@ -76,6 +78,7 @@ export function Studio({
       setAudioDuration(p.audioDurationSec ?? 0);
       setPipelineLogs(p.pipelineLogs ?? []);
       setFilm(p.generatedFilm ?? null);
+      setDraftFilm(p.pipelineDraft ?? null);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
       if (p.audioUrl?.startsWith("blob:")) {
@@ -170,7 +173,10 @@ export function Studio({
     onProjectChange?.();
   }, [audioDuration, ensureProject, onProjectChange]);
 
-  const handleGenerate = useCallback(async () => {
+  const handlePipelineRun = useCallback(async (opts?: {
+    resume?: boolean;
+    startFromStage?: "audio-align" | "planning" | "art-direction" | "coding" | "validation";
+  }) => {
     setError(null);
     if (!apiReady) {
       setError("AI-authored Remotion scenes require an OpenAI-compatible API key. Open API Settings; there is intentionally no prebuilt-template fallback for user films.");
@@ -182,7 +188,11 @@ export function Studio({
       return;
     }
     setProcessing(true);
-    setPipelineLogs([]);
+    if (!opts?.resume && !opts?.startFromStage) {
+      setPipelineLogs([]);
+    } else {
+      setPipelineLogs((old) => old.filter((e) => e.status !== "error" && e.stage !== "error"));
+    }
     setStageProgress(null);
     setStartedAt(Date.now());
     const log = (entry: PipelineLog) => setPipelineLogs((old) => [...old, entry]);
@@ -193,7 +203,10 @@ export function Studio({
       let confidence = 0.5;
       let duration = audioDuration;
 
-      if (audioFile && (!raw || !raw.words.length)) {
+      // If user requested restarting audio-align stage, force re-aligning
+      const forceReAlign = opts?.startFromStage === "audio-align";
+
+      if (audioFile && (!raw || !raw.words.length || forceReAlign)) {
         setAligning(true);
         try {
           if (!hasValidKey()) throw new Error("Whisper word alignment needs the configured API key.");
@@ -251,12 +264,18 @@ export function Studio({
         audioUrl: undefined,
         rawTranscript: raw,
         status: "processing",
-        generatedFilm: null,
       });
       if (audioFile) await saveAudioBlob(p.id, audioFile);
       setAudioDuration(duration);
       setTranscriptText(finalText);
       setRawTranscript(raw);
+
+      // Determine resume target:
+      // If restarting from planning or audio-align, clear the resume target so it generates a fresh storyboard
+      const isFullRestart = opts?.startFromStage === "planning" || opts?.startFromStage === "audio-align";
+      const resumeTarget = isFullRestart
+        ? null
+        : (draftFilm || film || p.pipelineDraft || p.generatedFilm);
 
       const resultFilm = await runCreativePipeline({
         title: projectTitle.trim() || p.title,
@@ -267,17 +286,30 @@ export function Studio({
         sourceAudioName: audioFile?.name ?? p.audioFileName,
         alignment,
         alignmentConfidence: confidence,
+        resumeFilm: resumeTarget,
+        startFromStage: opts?.startFromStage,
         onLog: log,
         onStage: (stage, completed, total, message) => setStageProgress({ stage, completed, total, message }),
+        onSaveSnapshot: (snapshot, _stage) => {
+          setDraftFilm(snapshot);
+          updateProject(p.id, {
+            pipelineDraft: snapshot,
+            failedStage: null,
+            status: "processing",
+          });
+        },
       });
 
       setFilm(resultFilm);
+      setDraftFilm(null);
       const updated = updateProject(p.id, {
         title: projectTitle.trim() || p.title,
         transcriptText: finalText,
         audioDurationSec: duration,
         rawTranscript: raw,
         generatedFilm: resultFilm,
+        pipelineDraft: null,
+        failedStage: null,
         beats: [],
         shots: [],
         frameLocked: [],
@@ -293,12 +325,17 @@ export function Studio({
       const message = (e as Error).message || "Unknown generation error";
       setError(message);
       setPipelineLogs((old) => [...old, { stage: "error", message, status: "error", timestamp: Date.now() }]);
-      if (project) updateProject(project.id, { status: "error", pipelineLogs: [...pipelineLogs, { stage: "error", message, status: "error", timestamp: Date.now() }] });
+      if (project) {
+        updateProject(project.id, {
+          status: "error",
+          pipelineLogs: [...pipelineLogs, { stage: "error", message, status: "error", timestamp: Date.now() }],
+        });
+      }
     } finally {
       setAligning(false);
       setProcessing(false);
     }
-  }, [apiReady, audioFile, rawTranscript, transcriptText, audioDuration, hasValidKey, onOpenSettings, onProjectChange, pipelineLogs, ensureProject, projectTitle, project, creativeBrief]);
+  }, [apiReady, audioFile, rawTranscript, transcriptText, audioDuration, hasValidKey, onOpenSettings, onProjectChange, pipelineLogs, ensureProject, projectTitle, project, creativeBrief, draftFilm, film]);
 
   const regenerateShot = useCallback(async (shotId: string, validationError?: string) => {
     if (!film) return;
@@ -357,8 +394,102 @@ export function Studio({
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            <span className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]" title="Every step, shot, and prompt is auto-saved to IndexedDB">
+              <Check className="w-3 h-3" /> Auto-saved (IDB)
+            </span>
+            <button
+              onClick={() => {
+                if (!project) return;
+                const exportData: Project = {
+                  ...project,
+                  title: projectTitle.trim() || project.title,
+                  transcriptText,
+                  rawTranscript,
+                  audioDurationSec: audioDuration,
+                  pipelineDraft: draftFilm || project.pipelineDraft,
+                  generatedFilm: film || project.generatedFilm,
+                  pipelineLogs,
+                  updatedAt: Date.now(),
+                };
+                const jsonStr = JSON.stringify(exportData, null, 2);
+                const blob = new Blob([jsonStr], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                const safeTitle = (project.title || "motion-film").replace(/[^a-z0-9_-]/gi, "_").toLowerCase();
+                a.download = `${safeTitle}.frame60.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+              }}
+              disabled={!project}
+              title="Download full project JSON (phases, shots, prompts, code)"
+              className="px-2.5 py-1.5 rounded-lg bg-[color:var(--color-surface)] border border-[color:var(--color-border)] hover:bg-[color:var(--color-surface-3)] text-[color:var(--color-text-soft)] hover:text-[color:var(--color-text)] text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Export JSON</span>
+            </button>
+            <label
+              title="Load a project or film from a JSON file"
+              className="px-2.5 py-1.5 rounded-lg bg-[color:var(--color-surface)] border border-[color:var(--color-border)] hover:bg-[color:var(--color-surface-3)] text-[color:var(--color-text-soft)] hover:text-[color:var(--color-text)] text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Import JSON</span>
+              <input
+                type="file"
+                accept=".json,.frame60.json"
+                hidden
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const text = await file.text();
+                    const parsed = JSON.parse(text);
+                    let importedProject: Project;
+                    if (parsed.shots && parsed.durationInFrames) {
+                      const filmData = parsed as GeneratedFilm;
+                      importedProject = createProject({
+                        title: filmData.title || file.name.replace(/\.[^/.]+$/, ""),
+                        transcriptText: filmData.transcript || "",
+                        audioDurationSec: filmData.audioDurationSec || (filmData.durationInFrames / 60),
+                      });
+                      importedProject.generatedFilm = filmData;
+                      importedProject.pipelineDraft = filmData;
+                      importedProject.status = "ready";
+                    } else {
+                      importedProject = {
+                        ...parsed,
+                        id: `proj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                        title: parsed.title || file.name.replace(/\.[^/.]+$/, ""),
+                        createdAt: Date.now(),
+                        updatedAt: Date.now(),
+                      };
+                    }
+                    await saveProjectToIDB(importedProject);
+                    updateProject(importedProject.id, importedProject);
+                    setActiveProjectId(importedProject.id);
+                    onProjectIdChange?.(importedProject.id);
+                    setProject(importedProject);
+                    setProjectTitle(importedProject.title);
+                    setTranscriptText(importedProject.transcriptText || "");
+                    setRawTranscript(importedProject.rawTranscript || null);
+                    setAudioDuration(importedProject.audioDurationSec || 0);
+                    setFilm(importedProject.generatedFilm || null);
+                    setDraftFilm(importedProject.pipelineDraft || null);
+                    setPipelineLogs(importedProject.pipelineLogs || []);
+                    setError(null);
+                    onProjectChange?.();
+                  } catch (err) {
+                    setError(`Failed to import JSON: ${(err as Error).message}`);
+                  } finally {
+                    e.target.value = "";
+                  }
+                }}
+              />
+            </label>
             <div className={`px-3 py-1.5 rounded-full border font-mono text-[10px] ${apiReady ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300" : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"}`}>
-              {apiReady ? `${env.model} · connected` : "Model not configured"}
+              {apiReady ? `${env.routeName}: ${env.model} · connected` : "Model not configured"}
             </div>
             <button onClick={onOpenSettings} className="p-2 rounded-lg bg-[color:var(--color-surface)] border border-[color:var(--color-border)] hover:bg-[color:var(--color-surface-3)] text-[color:var(--color-text-soft)]" aria-label="AI configuration">
               <Settings2 className="w-4 h-4" />
@@ -482,7 +613,7 @@ export function Studio({
             <div className="lg:col-span-5 flex flex-col gap-2">
               <button
                 disabled={!canGenerate}
-                onClick={() => void handleGenerate()}
+                onClick={() => void handlePipelineRun()}
                 className="w-full flex-1 min-h-[88px] rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-colors"
               >
                 {processing || aligning ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Wand2 className="w-4 h-4" />}
@@ -506,16 +637,43 @@ export function Studio({
         </section>
 
         {/* ── PROGRESS: minimal headings, expandable model working ── */}
-        {(pipelineLogs.length > 0 || processing) && (
+        {(pipelineLogs.length > 0 || processing || Boolean(draftFilm || project?.pipelineDraft)) && (
           <section className="mb-6">
-            <PipelineProgress logs={pipelineLogs} stageProgress={stageProgress} running={processing || aligning} startedAt={startedAt} />
+            <PipelineProgress
+              logs={pipelineLogs}
+              stageProgress={stageProgress}
+              running={processing || aligning}
+              startedAt={startedAt}
+              hasDraft={Boolean(draftFilm || project?.pipelineDraft || film)}
+              onContinue={() => void handlePipelineRun({ resume: true })}
+              onStartFromStage={(stage) => void handlePipelineRun({ startFromStage: stage })}
+            />
           </section>
         )}
 
         {error && (
-          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-3 flex gap-2 text-sm text-red-700 dark:text-red-300">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-            <span>{error}</span>
+          <div className="mb-6 rounded-xl border border-red-500/30 bg-red-500/10 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm text-red-700 dark:text-red-300">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5 text-red-500" />
+              <div>
+                <div className="font-semibold text-red-800 dark:text-red-200">Pipeline stopped on error</div>
+                <div className="text-xs text-red-700 dark:text-red-300 break-words mt-0.5">{error}</div>
+                {(draftFilm || project?.pipelineDraft) && (
+                  <div className="text-[11px] text-red-600 dark:text-red-400 mt-1">
+                    Progress preserved: {(draftFilm || project?.pipelineDraft)?.shots.filter((s) => s.visualPrompt?.elements?.length).length} visual prompts ready, {(draftFilm || project?.pipelineDraft)?.shots.filter((s) => s.codeStatus === "smoke-passed").length} components compiled.
+                  </div>
+                )}
+              </div>
+            </div>
+            {(draftFilm || project?.pipelineDraft) && !processing && (
+              <button
+                onClick={() => void handlePipelineRun({ resume: true })}
+                className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer flex-shrink-0"
+              >
+                <Play className="w-3.5 h-3.5 fill-current" />
+                Continue Pipeline
+              </button>
+            )}
           </div>
         )}
 

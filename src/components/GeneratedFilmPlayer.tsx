@@ -221,10 +221,10 @@ export function GeneratedFilmPlayer({
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-[color:var(--color-surface)] rounded-xl border border-[color:var(--color-border)] p-4">
             <div className="flex items-center justify-between gap-3">
-              <div><div className="font-mono text-[10px] uppercase tracking-widest text-[color:var(--color-text-faint)]">AI art direction · {currentShot.shotId}</div><div className="font-semibold mt-1">{currentShot.visualPrompt.visualMetaphor}</div></div>
+              <div><div className="font-mono text-[10px] uppercase tracking-widest text-[color:var(--color-text-faint)]">AI art direction · {currentShot.shotId}</div><div className="font-semibold mt-1">{currentShot.visualPrompt?.visualMetaphor || "Custom Visual"}</div></div>
               {onRegenerateShot && <button onClick={() => onRegenerateShot(currentShot.shotId)} className="px-3 py-2 rounded-lg border border-[color:var(--color-border)] text-xs hover:bg-[color:var(--color-surface-3)] flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Regenerate</button>}
             </div>
-            <p className="text-sm leading-relaxed text-[color:var(--color-text-soft)] mt-3">{currentShot.visualPrompt.renderPrompt}</p>
+            <p className="text-sm leading-relaxed text-[color:var(--color-text-soft)] mt-3">{currentShot.visualPrompt?.renderPrompt || currentShot.visualSummary}</p>
             <div className="mt-3 flex flex-wrap gap-1.5">{currentShot.designChoices.map((x) => <span key={x} className="text-[10px] font-mono px-2 py-1 rounded bg-[color:var(--color-surface-3)]">{x}</span>)}</div>
           </div>
           <div className="bg-[#0b0d12] rounded-xl border border-zinc-800 p-4">

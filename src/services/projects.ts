@@ -39,6 +39,8 @@ export interface Project {
   varietyReport?: VarietyReport | null;
   // User-created videos are model-authored Remotion scenes, not archetype instances.
   generatedFilm?: GeneratedFilm | null;
+  pipelineDraft?: GeneratedFilm | null;
+  failedStage?: string | null;
   renderedVideoBlobKey?: string | null;
   validation: ValidationResult[];
   pipelineLogs: PipelineLog[];
@@ -52,56 +54,121 @@ const LS_KEY = "frame60_projects_v2";
 const LS_ACTIVE = "frame60_active_project";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// IndexedDB for audio blobs (localStorage 5MB limit workaround)
+// IndexedDB for audio blobs & full Project JSON (localStorage 5MB limit workaround)
 // ──────────────────────────────────────────────────────────────────────────────
 
-const DB_NAME = "frame60_audio";
-const STORE = "blobs";
+const DB_NAME = "frame60_storage_v1";
+const DB_VERSION = 1;
+const STORE_BLOBS = "blobs";
+const STORE_PROJECTS = "projects";
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if (!db.objectStoreNames.contains(STORE_BLOBS)) db.createObjectStore(STORE_BLOBS);
+      if (!db.objectStoreNames.contains(STORE_PROJECTS)) db.createObjectStore(STORE_PROJECTS, { keyPath: "id" });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
+export async function saveProjectToIDB(project: Project): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((res, rej) => {
+      const tx = db.transaction(STORE_PROJECTS, "readwrite");
+      tx.objectStore(STORE_PROJECTS).put(project);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+  } catch (err) {
+    console.error("Failed to save project to IndexedDB:", err);
+  }
+}
+
+export async function loadProjectFromIDB(id: string): Promise<Project | null> {
+  try {
+    const db = await openDB();
+    const proj = await new Promise<Project | null>((res) => {
+      const tx = db.transaction(STORE_PROJECTS, "readonly");
+      const req = tx.objectStore(STORE_PROJECTS).get(id);
+      req.onsuccess = () => res((req.result as Project) || null);
+      req.onerror = () => res(null);
+    });
+    db.close();
+    return proj;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadAllProjectsFromIDB(): Promise<Project[]> {
+  try {
+    const db = await openDB();
+    const list = await new Promise<Project[]>((res) => {
+      const tx = db.transaction(STORE_PROJECTS, "readonly");
+      const req = tx.objectStore(STORE_PROJECTS).getAll();
+      req.onsuccess = () => res((req.result as Project[]) || []);
+      req.onerror = () => res([]);
+    });
+    db.close();
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteProjectFromIDB(id: string): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((res) => {
+      const tx = db.transaction(STORE_PROJECTS, "readwrite");
+      tx.objectStore(STORE_PROJECTS).delete(id);
+      tx.oncomplete = () => res();
+      tx.onerror = () => res();
+    });
+    db.close();
+  } catch {}
+}
+
 export async function saveAudioBlob(projectId: string, blob: Blob): Promise<void> {
   try {
     const db = await openDB();
     await new Promise<void>((res, rej) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(blob, projectId);
+      const tx = db.transaction(STORE_BLOBS, "readwrite");
+      tx.objectStore(STORE_BLOBS).put(blob, projectId);
       tx.oncomplete = () => res();
       tx.onerror = () => rej(tx.error);
     });
     db.close();
   } catch {
-    // fallback: store as data URL in localStorage if IDB unavailable
+    // fallback
   }
 }
 
 export async function saveRenderBlob(projectId: string, blob: Blob): Promise<void> {
-  const db = await openDB();
-  await new Promise<void>((res, rej) => {
-    const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put(blob, `render:${projectId}`);
-    tx.oncomplete = () => res();
-    tx.onerror = () => rej(tx.error);
-  });
-  db.close();
+  try {
+    const db = await openDB();
+    await new Promise<void>((res, rej) => {
+      const tx = db.transaction(STORE_BLOBS, "readwrite");
+      tx.objectStore(STORE_BLOBS).put(blob, `render:${projectId}`);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+  } catch {}
 }
 
 export async function loadRenderBlob(projectId: string): Promise<Blob | null> {
   try {
     const db = await openDB();
     const blob = await new Promise<Blob | null>((res) => {
-      const tx = db.transaction(STORE, "readonly");
-      const req = tx.objectStore(STORE).get(`render:${projectId}`);
+      const tx = db.transaction(STORE_BLOBS, "readonly");
+      const req = tx.objectStore(STORE_BLOBS).get(`render:${projectId}`);
       req.onsuccess = () => res((req.result as Blob) || null);
       req.onerror = () => res(null);
     });
@@ -115,14 +182,36 @@ export async function loadRenderBlob(projectId: string): Promise<Blob | null> {
 export async function loadAudioBlob(projectId: string): Promise<Blob | null> {
   try {
     const db = await openDB();
-    const blob = await new Promise<Blob | null>((res) => {
-      const tx = db.transaction(STORE, "readonly");
-      const req = tx.objectStore(STORE).get(projectId);
+    let blob = await new Promise<Blob | null>((res) => {
+      const tx = db.transaction(STORE_BLOBS, "readonly");
+      const req = tx.objectStore(STORE_BLOBS).get(projectId);
       req.onsuccess = () => res((req.result as Blob) || null);
       req.onerror = () => res(null);
     });
     db.close();
-    return blob;
+    if (blob) return blob;
+
+    // Check legacy DB if needed
+    try {
+      const legacyDB = await new Promise<IDBDatabase>((res, rej) => {
+        const req = indexedDB.open("frame60_audio", 1);
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej();
+      });
+      blob = await new Promise<Blob | null>((res) => {
+        const tx = legacyDB.transaction("blobs", "readonly");
+        const req = tx.objectStore("blobs").get(projectId);
+        req.onsuccess = () => res((req.result as Blob) || null);
+        req.onerror = () => res(null);
+      });
+      legacyDB.close();
+      if (blob) {
+        await saveAudioBlob(projectId, blob);
+      }
+      return blob;
+    } catch {
+      return null;
+    }
   } catch {
     return null;
   }
@@ -132,9 +221,9 @@ export async function deleteAudioBlob(projectId: string): Promise<void> {
   try {
     const db = await openDB();
     await new Promise<void>((res) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).delete(projectId);
-      tx.objectStore(STORE).delete(`render:${projectId}`);
+      const tx = db.transaction(STORE_BLOBS, "readwrite");
+      tx.objectStore(STORE_BLOBS).delete(projectId);
+      tx.objectStore(STORE_BLOBS).delete(`render:${projectId}`);
       tx.oncomplete = () => res();
       tx.onerror = () => res();
     });
@@ -143,7 +232,7 @@ export async function deleteAudioBlob(projectId: string): Promise<void> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Project CRUD (localStorage)
+// Project CRUD (localStorage index + IndexedDB lossless storage)
 // ──────────────────────────────────────────────────────────────────────────────
 
 function loadAll(): Project[] {
@@ -156,11 +245,39 @@ function loadAll(): Project[] {
   }
 }
 
+function compactProject(p: Project): Project {
+  // If draft or film is huge, keep metadata, shot list structure and visual summaries,
+  // but strip large repeated sourceCode in localStorage so it never hits the 5MB browser quota.
+  // Full lossless sourceCode and AST are safely preserved in IndexedDB!
+  return {
+    ...p,
+    pipelineDraft: p.pipelineDraft ? {
+      ...p.pipelineDraft,
+      shots: p.pipelineDraft.shots.map((s) => ({
+        ...s,
+        sourceCode: s.sourceCode && s.sourceCode.length > 500 ? "" : s.sourceCode,
+      })),
+    } : null,
+    generatedFilm: p.generatedFilm ? {
+      ...p.generatedFilm,
+      shots: p.generatedFilm.shots.map((s) => ({
+        ...s,
+        sourceCode: s.sourceCode && s.sourceCode.length > 500 ? "" : s.sourceCode,
+      })),
+    } : null,
+  };
+}
+
 function saveAll(projects: Project[]) {
   try {
     localStorage.setItem(LS_KEY, JSON.stringify(projects));
-  } catch (e) {
-    console.warn("Failed to save projects (quota?)", e);
+  } catch {
+    try {
+      const compact = projects.map(compactProject);
+      localStorage.setItem(LS_KEY, JSON.stringify(compact));
+    } catch (e2) {
+      console.warn("localStorage quota exceeded; IndexedDB holds primary state.", e2);
+    }
   }
 }
 
@@ -170,6 +287,12 @@ export function getProjects(): Project[] {
 
 export function getProject(id: string): Project | null {
   return loadAll().find((p) => p.id === id) ?? null;
+}
+
+export async function getProjectAsync(id: string): Promise<Project | null> {
+  const fromIDB = await loadProjectFromIDB(id);
+  if (fromIDB) return fromIDB;
+  return getProject(id);
 }
 
 export function createProject(opts: { title: string; transcriptText?: string; audioFileName?: string; audioDurationSec?: number; audioUrl?: string; rawTranscript?: RawTranscriptJSON | null }): Project {
@@ -190,6 +313,8 @@ export function createProject(opts: { title: string; transcriptText?: string; au
     frameLocked: [],
     varietyReport: null,
     generatedFilm: null,
+    pipelineDraft: null,
+    failedStage: null,
     renderedVideoBlobKey: null,
     validation: [],
     pipelineLogs: [],
@@ -199,6 +324,7 @@ export function createProject(opts: { title: string; transcriptText?: string; au
   const all = loadAll();
   all.unshift(project);
   saveAll(all);
+  void saveProjectToIDB(project);
   return project;
 }
 
@@ -206,15 +332,18 @@ export function updateProject(id: string, patch: Partial<Project>): Project | nu
   const all = loadAll();
   const idx = all.findIndex((p) => p.id === id);
   if (idx < 0) return null;
-  all[idx] = { ...all[idx], ...patch, updatedAt: Date.now() };
+  const updated: Project = { ...all[idx], ...patch, updatedAt: Date.now() };
+  all[idx] = updated;
   saveAll(all);
-  return all[idx];
+  void saveProjectToIDB(updated);
+  return updated;
 }
 
 export function deleteProject(id: string): void {
   const all = loadAll().filter((p) => p.id !== id);
   saveAll(all);
   deleteAudioBlob(id);
+  void deleteProjectFromIDB(id);
   // if active was this one, clear
   if (getActiveProjectId() === id) setActiveProjectId(null);
 }
@@ -232,6 +361,7 @@ export function duplicateProject(id: string): Project | null {
   const all = loadAll();
   all.unshift(copy);
   saveAll(all);
+  void saveProjectToIDB(copy);
   return copy;
 }
 

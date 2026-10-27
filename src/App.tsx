@@ -14,6 +14,7 @@ import { Studio } from "./components/Studio";
 import { ProjectsDashboard } from "./components/ProjectsDashboard";
 import { SettingsDialog } from "./components/SettingsDialog";
 import { getProjects, getActiveProjectId, setActiveProjectId, createProject } from "./services/projects";
+import { getEnvStatus } from "./services/env";
 import { useTheme } from "./hooks/useTheme";
 import { Moon, Sun } from "lucide-react";
 
@@ -288,6 +289,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const { isDark, toggle: toggleTheme } = useTheme();
+  const envStatus = getEnvStatus();
 
   useEffect(() => {
     // deep-link: #studio, #projects, #demo
@@ -337,7 +339,15 @@ export default function App() {
             >
               {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-            <button onClick={() => setSettingsOpen(true)} className="px-3 py-1.5 rounded-full bg-[color:var(--color-surface)] border border-[color:var(--color-border)] text-xs font-medium text-[color:var(--color-text-soft)] hover:bg-[color:var(--color-surface-3)]">API Settings</button>
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="px-3 py-1.5 rounded-full bg-[color:var(--color-surface)] border border-[color:var(--color-border)] text-xs font-medium text-[color:var(--color-text-soft)] hover:bg-[color:var(--color-surface-3)] flex items-center gap-1.5 transition-colors"
+              title={`Active Endpoint: ${envStatus.routeName} (${envStatus.model}) · ${envStatus.codeConcurrency} parallel code agents`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${envStatus.configured ? "bg-emerald-500" : "bg-amber-500"}`} />
+              <span>{envStatus.activeRoute === "route1" ? "AgentRouter" : "HCNSEC"}</span>
+              <span className="text-[10px] opacity-60 font-mono">({envStatus.codeConcurrency}x)</span>
+            </button>
             <button onClick={() => goStudio(null)} className="px-4 py-1.5 rounded-full bg-[#0066FF] text-white text-xs font-semibold hover:bg-[#0052cc]">New Film +</button>
           </div>
         </div>

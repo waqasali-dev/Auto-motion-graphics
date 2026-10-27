@@ -101,7 +101,7 @@ export function GeneratedFilmComposition({ film, scenes, audioSrc }: GeneratedFi
           <Sequence key={shot.shotId} from={shot.startFrame} durationInFrames={shot.durationFrames} name={shot.shotId}>
             <Scene
               shotPlan={shot}
-              visualPrompt={shot.visualPrompt}
+              visualPrompt={shot.visualPrompt!}
               wordCues={shot.wordCues}
               continuity={shot.continuity}
               assets={[]}

@@ -67,7 +67,7 @@ export interface GeneratedSceneShot extends CreativeShotPlan {
   endFrame: number;
   durationFrames: number;
   wordCues: WordCue[];
-  visualPrompt: ShotVisualPrompt;
+  visualPrompt?: ShotVisualPrompt;
   sourceCode: string;
   sourceHash: string;
   visualSummary: string;
