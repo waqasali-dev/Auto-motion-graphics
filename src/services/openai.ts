@@ -913,16 +913,23 @@ DYNAMIC SCENE COUNT & PACING:
 - Never fix or clamp the shot count to a static preset; let the speech duration and sentence flow decide the number of scenes.
 
 MANDATORY HERO COMPONENT ARCHETYPES (You must plan one for every shot's 'visualIdea'):
-1. [Comparison Cards]: 2 large floating panels (light vs dark, width: 700px, height: 420px each) comparing models, pricing, or options with brand badges, metric rows, and an animated coral/orange callout focus frame (<mg.FocusFrame>).
-2. [Ranked Bar Comparison]: Drawn baseline line with 3-4 thick vertical bars shooting up with spring physics, rolling numbers atop each bar, and winner singled out with accent glow.
-3. [SVG Line Chart Story]: 1400px wide area/line trend chart with grid lines, gradient underfill, trim-path stroke reveal (<mg.Stroke>), and peak callout pin with rolling numeral.
-4. [Connected Node Mesh]: 6-8 system/pipeline node pills linked by curved bezier lines with glowing traveling pulse packets and sonar pulse rings.
-5. [Bento Metric Grid]: 3-4 structured large metric slabs filling the frame with rolling counters (<mg.Roll>), percentage rings, and status tags.
-6. [Query & Inspection Trace]: Search/terminal input typing out query character-by-character with 3-4 cascading result cards with confidence scores, or data table with floating magnifier reticle.
-7. [Stat Slab & Capsule]: Expanding capsule pill with rolling odometer (<mg.Roll>) and giant 800px ghost background numeral.
+1. [Bespoke Narrative Vector SVG]: When the transcript mentions a concrete entity, object, vehicle, machine, or figure (e.g., an airplane, a helicopter, Iron Man, a drone, a rocket, a camera, a server rack, a heart/brain, or a device), plan a LARGE, BEAUTIFULLY STYLIZED BESPOKE 2D VECTOR SVG ILLUSTRATION (occupying 65% to 85% of the frame) representing that subject, accompanied by motion graphics telemetry, callout markers (<mg.Marker>), animated HUD circles/rings, and glow effects.
+2. [Comparison Cards]: 2 large floating panels (light vs dark, width: 700px, height: 420px each) comparing models, pricing, or options with brand badges, metric rows, and an animated coral/orange callout focus frame (<mg.FocusFrame>).
+3. [Ranked Bar Comparison]: Drawn baseline line with 3-4 thick vertical bars shooting up with spring physics, rolling numbers atop each bar, and winner singled out with accent glow.
+4. [SVG Line Chart Story]: 1400px wide area/line trend chart with grid lines, gradient underfill, trim-path stroke reveal (<mg.Stroke>), and peak callout pin with rolling numeral.
+5. [Connected Node Mesh]: 6-8 system/pipeline node pills linked by curved bezier lines with glowing traveling pulse packets and sonar pulse rings.
+6. [Bento Metric Grid]: 3-4 structured large metric slabs filling the frame with rolling counters (<mg.Roll>), percentage rings, and status tags.
+7. [Query & Inspection Trace]: Search/terminal input typing out query character-by-character with 3-4 cascading result cards with confidence scores, or data table with floating magnifier reticle.
+8. [Stat Slab & Capsule]: Expanding capsule pill with rolling odometer (<mg.Roll>) and giant 800px ghost background numeral.
 
-ANTI-ILLUSTRATION RULE:
-DO NOT attempt literal figurative illustrations or complex physical sketches (no human bodies/anatomy, no robotic arms, no propulsion backpacks). Motion graphics communicate through clean 2D visual structures: cards, metric slabs, callout highlight boxes, typography, charts, and node graphs.
+SUBJECT & ENTITY SVG AWARENESS DIRECTIVE (CRITICAL):
+Listen closely to the spoken words and transcript. Whenever a concrete entity, subject, vehicle, character, or object is mentioned (e.g., an airplane, a helicopter, Iron Man, a satellite, a drone, a computer chip, a robot, a lock, an engine, etc.), you MUST plan a custom vector SVG for that subject as the scene's hero!
+Do not reduce scenes about real objects into generic cards or bars when a visual SVG representation will tell the story 10x better. For example:
+- If discussing aviation or flight -> plan a sleek vector jet or helicopter SVG banking through vector clouds with speed trails.
+- If discussing Iron Man or armor/suit technology -> plan an iconic vector helmet/chest arc-reactor SVG with glowing energy pulses and telemetry overlays.
+- If discussing security -> plan a high-tech vector shield or digital padlock SVG unlocking with glowing circuit traces.
+- If discussing data centers or cloud -> plan a vector server monolith with blinking LED nodes and beam sweeps.
+Describe the exact visual SVG in 'visualIdea' so the art director and code workers will author it in full vector fidelity.
 
 WORD ALIGNMENT IS SACRED:
 The provided word list has global integer frame starts, spoken ends, pause frames, and ASR confidence. Use those global word indices for emphasis. Never invent or rewrite the spoken transcript. Never output float timestamps. Shot boundaries are sentence indices only; the runtime derives all frame times.
@@ -999,6 +1006,7 @@ MANDATORY HERO COMPONENT (NO TEXT-ONLY SCENES):
 - The scene MUST be dominated by a LARGE ANIMATED VISUAL COMPONENT filling 65% to 85% of the 1920x1080 comp.
 - Text is kept compact at top-left (e.g. <mg.Heading kicker='...' title='...' frameAt={2} style={{ position: 'absolute', left: 100, top: 70 }} />).
 - Specify the exact large component architecture, dimensions, and layout:
+  - e.g., "Large 800x600px bespoke vector SVG of an airplane / helicopter / Iron Man armor helmet centered at (960, 540) with multi-layered paths, thruster glow, and animated speed trails"
   - e.g., "Two 720x420px floating comparison cards tilted -2° and +2° with metric tiles and an animated coral focus frame"
   - e.g., "1400x520px ranked bar chart with 3 bars shooting up from a baseline with glowing winner spotlight"
   - e.g., "1400x500px SVG line chart with gradient underfill, pen path, and peak callout"
@@ -1012,8 +1020,11 @@ FAST ANIMATION TIMING (From Demo Reel):
 - Frame 16–26: Focus callout frame (<mg.FocusFrame>) or winner highlight pops around the key metric.
 - Continuous: Subtle camera push (<mg.CameraRig zoom={1.03}>) and traveling pulses.
 
-CRITICAL CONSTRAINT:
-DO NOT describe human anatomy, body silhouettes, mechanical robots, robotic arms, or physical sketches. Focus entirely on large 2D graphic components: cards, stat slabs, callout frames, charts, typography, and node graphs.
+SUBJECT & ENTITY SVG ART DIRECTION:
+When the shot features a narrative subject (like a plane, helicopter, Iron Man, drone, robot, satellite, vehicle, device, or tool):
+- Detail the exact SVG construction: viewBox (e.g. 0 0 800 600), primary silhouette paths, internal accent paths, highlight gradients, and glow filters (<filter id="mgGlow">).
+- Choreograph its kinetic behavior: entrance spring (stiffness: 160, damping: 14), continuous breathing or floating motion (e.g. translateY with Math.sin, banking rotate with Math.sin), trailing speed particles or shockwave rings, and callout focus markers (<mg.Marker>, <mg.FocusFrame>).
+- Ensure it anchors 65% to 85% of the comp as the undeniable visual hero of the scene!
 
 Tie animation events to the provided local word indexes. All important motion reveals must complete by the cue's spokenEndFrame.`;
   const prompt = `FILM NORTH STAR: ${args.filmNorthStar}
@@ -1064,44 +1075,58 @@ Your output must look like a scene from an Apple/OpenAI keynote or the demo reel
    - Focus callouts: <mg.FocusFrame frameAt={18} color="#FF5500" borderRadius={16}> popping around key metrics with spring physics.
    - Smooth continuous camera push: <mg.CameraRig zoom={interpolate(frame, [0, durationInFrames], [1, 1.04], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}>.
 
-3. CHOOSE AND BUILD ONE OF THESE 6 PROVEN DEMO COMPONENT ARCHETYPES:
+3. CHOOSE AND BUILD ONE OF THESE PROVEN DEMO COMPONENT ARCHETYPES:
 
-   ARCHETYPE A: DUAL COMPARISON CARDS (Image 2 & SplitComparison)
+   ARCHETYPE A: BESPOKE NARRATIVE VECTOR SVG (Vehicles, Characters, Devices, Real-World Objects)
+   - When the shot describes a concrete entity (e.g. plane, helicopter, Iron Man, drone, satellite, robot, tool, chip, engine):
+   - Layout: Centered large vector container (width: 700-1100px, height: 500-750px) at comp center (x: 400-600px, y: 220-300px).
+   - SVG Construction:
+     - Use a well-proportioned <svg viewBox="0 0 800 600" width={800} height={600} style={{ overflow: "visible" }}>.
+     - Multi-layered vector design: base silhouette with deep fills or linear gradients (<linearGradient>), secondary panel lines with stroke and strokeDasharray, highlighted edges, thruster/energy glow with filter="url(#mgGlow)", and glowing accent rings.
+     - You have full access to standard SVG tags: <defs>, <linearGradient>, <radialGradient>, <path d="..." />, <rect>, <circle>, <ellipse>, <polygon>, <g>.
+   - Kinetic Physics:
+     - Entrance: spring entrance scaling from 0.7 to 1.0 with subtle overshoot:
+       const enterSpring = spring({ frame: frame - 4, fps, config: { damping: 14, stiffness: 160 } });
+     - Lifelike Hover/Float: subtle continuous floating using Math.sin(frame * 0.05) * 12 on translateY, and subtle banking Math.sin(frame * 0.03) * 3 on rotate.
+     - Energy/Trail Effects: trailing SVG stroke lines (<mg.Stroke>) or pulsing circles (<circle r={...} opacity={...} />).
+     - Framing: Add technical HUD markers (<mg.Marker x={...} y={...} variant="cross" />) and metric badges around the SVG to give it a broadcast tech aesthetic.
+
+   ARCHETYPE B: DUAL COMPARISON CARDS (SplitComparison from Demo)
    - Layout: Two large floating cards (<mg.Card width={700} height={420} tilt={-2} mode="light"> and <mg.Card width={700} height={420} tilt={2} mode="dark">) positioned side-by-side or overlapping at center (top: 260px).
    - Content: Brand/product icon badge + title, micro-tags, row of 2-3 metric tiles (Context, Input, Output), and <mg.FocusFrame> around the winning metric!
    - Animation: Card 1 springs in at frame 4, Card 2 springs in at frame 9, focus box pops at frame 18.
 
-   ARCHETYPE B: RANKED BAR COMPARISON (BarComparison from Demo)
+   ARCHETYPE C: RANKED BAR COMPARISON (BarComparison from Demo)
    - Layout: Baseline line drawn at y: 860 (<line x1={160} x2={1760} y1={860} y2={860} stroke="rgba(255,255,255,0.2)" strokeWidth={3} />).
    - 3 to 4 massive bars (width: 240px, heights: 300-520px) shooting up from baseline:
      const barH = spring({ frame: frame - (10 + i * 6), fps, config: { damping: 14, stiffness: 150 } }) * targetH;
    - Bold number on top of each bar, label below baseline. Winner bar highlighted with accent color, glow, and side callout odometer.
 
-   ARCHETYPE C: SVG LINE CHART STORY (ChartStory from Demo)
+   ARCHETYPE D: SVG LINE CHART STORY (ChartStory from Demo)
    - Layout: 1400x500px SVG chart centered at top: 280px. 4 horizontal grid lines with numbers.
    - Path curve drawn with <mg.Stroke d="..." strokeWidth={6} color="#0066FF" durationFrames={36} />.
    - Area fill gradient underneath with linearGradient.
    - Glowing pen dot tracking current path head. Pinned callout pin at peak with <mg.Roll to={maxVal} />.
 
-   ARCHETYPE D: CONNECTED SYSTEM NETWORK (NetworkMesh from Demo)
+   ARCHETYPE E: CONNECTED SYSTEM NETWORK (NetworkMesh from Demo)
    - Layout: 6 to 8 node pills arranged in columns (e.g. Input, Planner, Workers, Validator) across 1500px width.
    - Curved SVG bezier connector paths (<path d="M... C..." fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={3} />).
    - Animated traveling pulse packets (<path d="..." stroke="#0066FF" strokeWidth={8} filter="url(#mgGlow)" strokeDasharray="0.08 2" strokeDashoffset={-((frame * 0.02) % 1)} />).
    - Sonar pulse rings around active nodes.
 
-   ARCHETYPE E: BENTO METRIC GRID (BentoBadgeCluster from Demo)
+   ARCHETYPE F: BENTO METRIC GRID (BentoBadgeCluster from Demo)
    - Layout: 3 to 4 large styled metric blocks filling the screen (e.g. 2 top cards width: 680px, 1 wide bottom card width: 1400px).
    - Backgrounds in contrasting dark/light/accent colors, rounded corners (20px).
    - Large rolling numerals (<mg.Roll fontSize={110} />), progress rings, uppercase label tags.
 
-   ARCHETYPE F: QUERY TRACE & TERMINAL (QueryTrace & MagnifierInspect from Demo)
+   ARCHETYPE G: QUERY TRACE & TERMINAL (QueryTrace & MagnifierInspect from Demo)
    - Layout: Search/terminal input box with animated typing query: query.slice(0, Math.floor(frame * 0.8)).
    - 3 large cascading result cards (width: 1400px) flying in at frames 12, 18, 24 with confidence score bars and rank tags.
 
-CRITICAL ANTI-PATTERN:
-- STRICTLY FORBIDDEN: DO NOT draw human silhouettes, bodies, limbs, or faces.
-- STRICTLY FORBIDDEN: DO NOT attempt complex mechanical drawings (robotic arms, gear assemblies, backpacks, machinery) using SVG paths.
-Always compose with clean 2D UI cards, metric slabs, callout boxes, typography, charts, and node networks.
+CRITICAL VECTOR & STORYTELLING DIRECTIVE:
+- When a real-world object or entity is discussed (airplane, helicopter, Iron Man, drone, satellite, robot, hardware), EMBRACE IT! Write rich, handcrafted, multi-path inline SVGs that clearly represent the subject with clean geometric, aerodynamic, or iconic styling.
+- DO NOT default to a generic blank card or text paragraph when a concrete object is in the speech.
+- Use clean vector shapes (<path d="..." />, <rect>, <circle>, <polygon>, <linearGradient>) combined with high-tech HUD accents, glowing filters, and fluid Remotion spring motion.
 
 OUTPUT RULES & COMPILATION CONTRACT:
 1. IMPORTS: Include only these exact imports:

@@ -24,7 +24,7 @@ const FPS = 60;
 const MAX_RETRIES = 3;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const REF_STYLE =
-  "The quality reference is premium 2D broadcast tech motion design (1920x1080 @ 60fps): sleek floating comparison cards, metric tiles with animated callout focus frames, bento badge grids, kinetic typography with word-synced reveals, animated data charts/bars, and connected node systems on subtle dark/light grid canvases. Clean, broadcast-grade 2D vector layouts. Never attempt complex anatomical drawings, human figures, or mechanical sketches.";
+  "The quality reference is premium 2D broadcast tech motion design (1920x1080 @ 60fps): sleek floating comparison cards, metric tiles with animated callout focus frames, bento badge grids, kinetic typography with word-synced reveals, animated data charts/bars, connected node systems, and bespoke vector SVG illustrations of narrative subjects on subtle dark/light grid canvases. Clean, broadcast-grade 2D vector layouts with expressive custom SVG art for concrete objects mentioned in speech.";
 
 export interface CreativePipelineInput {
   title: string;
