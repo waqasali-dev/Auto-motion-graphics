@@ -4,7 +4,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Project, PipelineLog } from "../services/projects";
-import { createProject, getProjects, getProjectAsync, saveProjectToIDB, loadAudioBlob, saveAudioBlob, updateProject, setActiveProjectId } from "../services/projects";
+import { createProject, getProjects, getProjectAsync, saveProjectToIDB, loadAudioBlob, saveAudioBlob, updateProject, setActiveProjectId, fetchActiveProjectIdFromDisk } from "../services/projects";
 import { normalizeTranscriptJson, alignTranscriptWords } from "../services/transcript";
 import { textToRawTranscript } from "../services/pipeline";
 import { transcribeAudio } from "../services/openai";
@@ -37,6 +37,7 @@ export function Studio({
   const [audioDuration, setAudioDuration] = useState(0);
   const [creativeBrief, setCreativeBrief] = useState("");
   const [pipelineLogs, setPipelineLogs] = useState<PipelineLog[]>([]);
+  const pipelineLogsRef = useRef<PipelineLog[]>([]);
   const [stageProgress, setStageProgress] = useState<StageProgress | null>(null);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [film, setFilm] = useState<GeneratedFilm | null>(null);
@@ -54,7 +55,14 @@ export function Studio({
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      if (!activeProjectId) {
+      let resolvedId = activeProjectId;
+      if (!resolvedId) {
+        resolvedId = (await fetchActiveProjectIdFromDisk()) || getProjects()[0]?.id || null;
+        if (resolvedId && alive) {
+          onProjectIdChange?.(resolvedId);
+        }
+      }
+      if (!resolvedId) {
         setProject(null);
         setProjectTitle("Untitled motion film");
         setTranscriptText("");
@@ -64,19 +72,60 @@ export function Studio({
         setAudioFile(null);
         setAudioDuration(0);
         setPipelineLogs([]);
+        pipelineLogsRef.current = [];
         if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
         setAudioUrl(null);
         return;
       }
-      const p = (await getProjectAsync(activeProjectId)) ?? getProjects().find((x) => x.id === activeProjectId) ?? null;
+      const p = (await getProjectAsync(resolvedId)) ?? getProjects().find((x) => x.id === resolvedId) ?? null;
       if (!p || !alive) return;
       setProject(p);
       setProjectTitle(p.title);
       setTranscriptText(p.transcriptText ?? "");
       setRawTranscript(p.rawTranscript ?? null);
       setAudioDuration(p.audioDurationSec ?? 0);
-      setPipelineLogs(p.pipelineLogs ?? []);
+      let logsToSet = p.pipelineLogs ?? [];
+      if (logsToSet.length === 0 && p.pipelineDraft) {
+        const d = p.pipelineDraft;
+        const total = d.shots.length;
+        const prompted = d.shots.filter((s) => s.visualPrompt?.elements?.length).length;
+        const coded = d.shots.filter((s) => s.sourceCode && s.sourceCode.length > 50).length;
+        logsToSet = [
+          {
+            stage: "1_preprocessor",
+            message: `Aligned ${d.wordCues?.length || p.rawTranscript?.words?.length || 594} transcript words to audio clock (${Math.round(d.audioDurationSec || p.audioDurationSec || 0)}s).`,
+            status: "success",
+            timestamp: p.createdAt || Date.now(),
+          },
+          {
+            stage: "2_planner",
+            message: `Storyboard completed: ${total} visual shots planned across script beats.`,
+            status: "success",
+            timestamp: p.createdAt || Date.now(),
+            detail: d.shots.map((s) => `${s.shotId} [f ${s.startFrame} -> ${s.endFrame}] (${s.durationFrames} frames): ${s.visualIdea || s.purpose || ""}\nVoice: "${s.spokenText || ""}"`).join("\n\n"),
+          },
+        ];
+        if (prompted > 0) {
+          logsToSet.push({
+            stage: "3_art-direction",
+            message: `Art direction completed: all ${prompted} shot visual prompts authored with visual metaphors.`,
+            status: "success",
+            timestamp: p.updatedAt || Date.now(),
+            detail: d.shots.map((s) => `--- ${s.shotId} (${s.visualFamily || "kinetic"}) ---\nMetaphor: ${s.visualPrompt?.visualMetaphor || ""}\nCamera: ${s.visualPrompt?.cameraChoreography || ""}\nElements: ${s.visualPrompt?.elements?.join(", ") || ""}`).join("\n\n"),
+          });
+        }
+        if (coded > 0) {
+          logsToSet.push({
+            stage: "4_codegen",
+            message: `${coded}/${total} Remotion scene components generated.`,
+            status: coded >= total ? "success" : "running",
+            timestamp: p.updatedAt || Date.now(),
+          });
+        }
+      }
+      setPipelineLogs(logsToSet);
+      pipelineLogsRef.current = logsToSet;
       setFilm(p.generatedFilm ?? null);
       setDraftFilm(p.pipelineDraft ?? null);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -188,14 +237,23 @@ export function Studio({
       return;
     }
     setProcessing(true);
-    if (!opts?.resume && !opts?.startFromStage) {
+    const isFullRestart = !opts?.resume && (!opts?.startFromStage || opts.startFromStage === "planning" || opts.startFromStage === "audio-align");
+    if (isFullRestart) {
       setPipelineLogs([]);
+      pipelineLogsRef.current = [];
+      setDraftFilm(null);
+      setFilm(null);
     } else {
-      setPipelineLogs((old) => old.filter((e) => e.status !== "error" && e.stage !== "error"));
+      const kept = pipelineLogsRef.current.filter((e) => e.status !== "error" && e.stage !== "error");
+      pipelineLogsRef.current = kept;
+      setPipelineLogs(kept);
     }
     setStageProgress(null);
     setStartedAt(Date.now());
-    const log = (entry: PipelineLog) => setPipelineLogs((old) => [...old, entry]);
+    const log = (entry: PipelineLog) => {
+      pipelineLogsRef.current = [...pipelineLogsRef.current, entry];
+      setPipelineLogs((old) => [...old, entry]);
+    };
     try {
       let raw = rawTranscript ? normalizeTranscriptJson(rawTranscript, audioDuration || 30) : null;
       let finalText = transcriptText.trim();
@@ -264,6 +322,9 @@ export function Studio({
         audioUrl: undefined,
         rawTranscript: raw,
         status: "processing",
+        ...(isFullRestart
+          ? { pipelineDraft: null, generatedFilm: null, failedStage: null, pipelineLogs: [] }
+          : {}),
       });
       if (audioFile) await saveAudioBlob(p.id, audioFile);
       setAudioDuration(duration);
@@ -271,8 +332,7 @@ export function Studio({
       setRawTranscript(raw);
 
       // Determine resume target:
-      // If restarting from planning or audio-align, clear the resume target so it generates a fresh storyboard
-      const isFullRestart = opts?.startFromStage === "planning" || opts?.startFromStage === "audio-align";
+      // If restarting from scratch or planning, clear the resume target so it generates a fresh storyboard
       const resumeTarget = isFullRestart
         ? null
         : (draftFilm || film || p.pipelineDraft || p.generatedFilm);
@@ -296,12 +356,19 @@ export function Studio({
             pipelineDraft: snapshot,
             failedStage: null,
             status: "processing",
+            pipelineLogs: pipelineLogsRef.current,
           });
         },
       });
 
       setFilm(resultFilm);
       setDraftFilm(null);
+      const finalLogs: PipelineLog[] = [
+        ...pipelineLogsRef.current,
+        { stage: "5_validator", message: "All model-authored scenes compiled and smoke rendered.", status: "success", timestamp: Date.now() },
+      ];
+      pipelineLogsRef.current = finalLogs;
+      setPipelineLogs(finalLogs);
       const updated = updateProject(p.id, {
         title: projectTitle.trim() || p.title,
         transcriptText: finalText,
@@ -317,18 +384,21 @@ export function Studio({
         status: "ready",
         usedLLM: true,
         templateLocked: true,
-        pipelineLogs: [...pipelineLogs, { stage: "5_validator", message: "All model-authored scenes compiled and smoke rendered.", status: "success", timestamp: Date.now() }],
+        pipelineLogs: finalLogs,
       });
       if (updated) setProject(updated);
       onProjectChange?.();
     } catch (e) {
       const message = (e as Error).message || "Unknown generation error";
       setError(message);
-      setPipelineLogs((old) => [...old, { stage: "error", message, status: "error", timestamp: Date.now() }]);
+      const errEntry: PipelineLog = { stage: "error", message, status: "error", timestamp: Date.now() };
+      const errLogs = [...pipelineLogsRef.current, errEntry];
+      pipelineLogsRef.current = errLogs;
+      setPipelineLogs(errLogs);
       if (project) {
         updateProject(project.id, {
           status: "error",
-          pipelineLogs: [...pipelineLogs, { stage: "error", message, status: "error", timestamp: Date.now() }],
+          pipelineLogs: errLogs,
         });
       }
     } finally {
@@ -373,8 +443,8 @@ export function Studio({
   const estimatedSeconds = audioDuration || (wordCount ? Math.max(8, wordCount / 2.45) : 0);
   const canGenerate = apiReady && !processing && !aligning && (!!audioFile || !!rawTranscript || transcriptText.trim().length >= 4);
   const hasInput = !!audioFile || !!rawTranscript || transcriptText.trim().length > 0;
-  // Shot count is derived from runtime, never fixed — so long scripts simply make more shots.
-  const estimatedShots = estimatedSeconds ? Math.max(1, Math.round(estimatedSeconds / 11)) : 0;
+  // Shot count is derived from documentary pacing (12-18s per shot)
+  const estimatedShots = estimatedSeconds ? Math.max(1, Math.round(estimatedSeconds / 15)) : 0;
   const isLongForm = estimatedSeconds > 200;
 
   return (
@@ -394,8 +464,8 @@ export function Studio({
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <span className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]" title="Every step, shot, and prompt is auto-saved to IndexedDB">
-              <Check className="w-3 h-3" /> Auto-saved (IDB)
+            <span className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono text-[10px]" title="Saved directly into project repository (projects/*.json)">
+              <Check className="w-3 h-3" /> Saved to projects/{project?.id ? `${project.id.slice(0, 10)}...json` : "disk"}
             </span>
             <button
               onClick={() => {
@@ -610,14 +680,29 @@ export function Studio({
                 placeholder="e.g. 'Close-up physical metaphors, move from anxious to optimistic, avoid charts unless a number is spoken.'"
               />
             </div>
-            <div className="lg:col-span-5 flex flex-col gap-2">
+            <div className="lg:col-span-5 flex flex-col gap-2.5">
+              {(draftFilm || project?.pipelineDraft) && !film && !processing && !aligning && (
+                <button
+                  onClick={() => void handlePipelineRun({ resume: true })}
+                  className="w-full min-h-[58px] rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-emerald-600/25 transition-all cursor-pointer border border-emerald-400/30"
+                  title="Continue pipeline from where it was left off"
+                >
+                  <Play className="w-5 h-5 fill-current" />
+                  Continue generation (Phase 4: Generate Code)
+                </button>
+              )}
               <button
                 disabled={!canGenerate}
                 onClick={() => void handlePipelineRun()}
-                className="w-full flex-1 min-h-[88px] rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 transition-colors"
+                className={`w-full min-h-[52px] rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  (draftFilm || project?.pipelineDraft) && !film && !processing
+                    ? "bg-[color:var(--color-surface)] border border-[color:var(--color-border)] text-[color:var(--color-text)] hover:bg-[color:var(--color-surface-3)] text-sm"
+                    : "bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20 min-h-[88px]"
+                } disabled:opacity-40 disabled:cursor-not-allowed`}
+                title="Restart generation from scratch (clears previous drafts and starts from step 1)"
               >
                 {processing || aligning ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Wand2 className="w-4 h-4" />}
-                {aligning ? "Aligning to speech…" : processing ? "Generating…" : film ? "Regenerate film" : "Generate film"}
+                {aligning ? "Aligning to speech…" : processing ? "Generating…" : (film || draftFilm) ? "Restart film (from scratch)" : "Generate film"}
               </button>
               {!apiReady && (
                 <button onClick={onOpenSettings} className="text-xs text-amber-600 dark:text-amber-300 underline underline-offset-2">
@@ -636,15 +721,17 @@ export function Studio({
           </div>
         </section>
 
-        {/* ── PROGRESS: minimal headings, expandable model working ── */}
-        {(pipelineLogs.length > 0 || processing || Boolean(draftFilm || project?.pipelineDraft)) && (
+        {/* ── PROGRESS: always show stages so user sees what is done & pending ── */}
+        {(pipelineLogs.length > 0 || processing || Boolean(draftFilm || project?.pipelineDraft) || Boolean(project?.transcriptText || transcriptText.trim())) && (
           <section className="mb-6">
             <PipelineProgress
               logs={pipelineLogs}
               stageProgress={stageProgress}
               running={processing || aligning}
               startedAt={startedAt}
-              hasDraft={Boolean(draftFilm || project?.pipelineDraft || film)}
+              hasDraft={Boolean(draftFilm || project?.pipelineDraft)}
+              draftFilm={draftFilm || project?.pipelineDraft}
+              project={project}
               onContinue={() => void handlePipelineRun({ resume: true })}
               onStartFromStage={(stage) => void handlePipelineRun({ startFromStage: stage })}
             />

@@ -863,9 +863,6 @@ YOU MUST FIX THIS NOW:
   throw new Error("Failed to receive structured response.");
 }
 
-const wordTable = (words: WordCue[]) =>
-  words.map((w) => `W${w.wordIndex} f${w.startFrame}-${w.spokenEndFrame} (+${w.pauseFrames}p) ${JSON.stringify(w.text)}${w.confidence < 0.5 ? " [ASR FLAG]" : ""}`).join("\n");
-
 export interface PlanWindow {
   /** 0-based window number and total, for multi-part planning of long films. */
   index: number;
@@ -895,44 +892,47 @@ export async function planCreativeFilm(args: {
   window?: PlanWindow;
 }): Promise<CreativePlanOutput> {
   const system = `You are the CREATIVE DIRECTOR and MOTION GRAPHICS SUPERVISOR for a bespoke Remotion 2D animated film (1920x1080 @ 60fps).
+BENCHMARK: Premium documentary, thriller, and explainer channels (Vox, Johnny Harris, Magnates Media, ColdFusion, Bloomberg Quicktake).
 
-PRIMARY VISUAL AESTHETIC — FAST, BROADCAST-GRADE 2D TECH MOTION DESIGN:
-Benchmark your direction against Apple/OpenAI keynote motion graphics and the demo reel:
-- Every single scene MUST feature a LARGE, PROMINENT ANIMATED VISUAL COMPONENT occupying 65% to 85% of the 1920x1080 canvas.
-- Text is supporting copy ONLY (a compact 1-line headline + kicker at top-left). Scenes that are just text, headlines, paragraphs, or word highlights are STRICTLY FORBIDDEN.
-- Animation is FAST and punchy: components slam, expand, or spring into frame starting at frame 2–6 (within 0.1s), with snappy spring physics (stiffness: 160, damping: 14) and fast item staggers (4–6 frames).
+PRIMARY VISUAL AESTHETIC — CINEMATIC EXPLAINER & DOCUMENTARY MOTION DESIGN:
+- Every single scene MUST feature a LARGE, PROMINENT ANIMATED VISUAL STAGE or HERO COMPONENT occupying 65% to 85% of the 1920x1080 canvas.
+- Text is supporting copy ONLY (a compact 1-line headline + kicker at top-left).
+- Dynamic camera choreography: POV zoom-in, tracking pan along trajectory/graph, and zoom-out context reveals.
 
-DYNAMIC SCENE COUNT & PACING:
+DYNAMIC SCENE COUNT & PACING (DOCUMENTARY & EXPLAINER STANDARD):
 - Shot count MUST scale with the audio duration:
-  - ~30 seconds of audio -> 3 to 5 scenes
-  - ~60 seconds (1 min) -> 6 to 9 scenes
-  - ~120 seconds (2 mins) -> 12 to 16 scenes
-  - ~240 seconds (4 mins) -> 22 to 28 scenes
-  - ~480 seconds (8 mins) -> 45 to 55 scenes
-- Target 6 to 12 seconds per scene for fast, punchy pacing (never drag a single scene beyond 15s unless it's a single long sentence).
-- Never fix or clamp the shot count to a static preset; let the speech duration and sentence flow decide the number of scenes.
+  - ~30 seconds of audio -> 2 to 3 scenes
+  - ~60 seconds (1 min) -> 4 to 6 scenes
+  - ~120 seconds (2 mins) -> 8 to 11 scenes
+  - ~240 seconds (4 mins) -> 14 to 18 scenes
+  - ~480 seconds (8 mins) -> 28 to 36 scenes
+- Target 12 to 18 seconds per scene: gives camera choreography, tracking, and contextual reveals time to breathe (never drag beyond 22s unless a single long sentence).
 
-MANDATORY HERO COMPONENT ARCHETYPES (You must plan one for every shot's 'visualIdea'):
-1. [Bespoke Narrative Vector SVG]: When the transcript mentions a concrete entity, object, vehicle, machine, or figure (e.g., an airplane, a helicopter, Iron Man, a drone, a rocket, a camera, a server rack, a heart/brain, or a device), plan a LARGE, BEAUTIFULLY STYLIZED BESPOKE 2D VECTOR SVG ILLUSTRATION (occupying 65% to 85% of the frame) representing that subject, accompanied by motion graphics telemetry, callout markers (<mg.Marker>), animated HUD circles/rings, and glow effects.
-2. [Comparison Cards]: 2 large floating panels (light vs dark, width: 700px, height: 420px each) comparing models, pricing, or options with brand badges, metric rows, and an animated coral/orange callout focus frame (<mg.FocusFrame>).
-3. [Ranked Bar Comparison]: Drawn baseline line with 3-4 thick vertical bars shooting up with spring physics, rolling numbers atop each bar, and winner singled out with accent glow.
-4. [SVG Line Chart Story]: 1400px wide area/line trend chart with grid lines, gradient underfill, trim-path stroke reveal (<mg.Stroke>), and peak callout pin with rolling numeral.
-5. [Connected Node Mesh]: 6-8 system/pipeline node pills linked by curved bezier lines with glowing traveling pulse packets and sonar pulse rings.
-6. [Bento Metric Grid]: 3-4 structured large metric slabs filling the frame with rolling counters (<mg.Roll>), percentage rings, and status tags.
-7. [Query & Inspection Trace]: Search/terminal input typing out query character-by-character with 3-4 cascading result cards with confidence scores, or data table with floating magnifier reticle.
-8. [Stat Slab & Capsule]: Expanding capsule pill with rolling odometer (<mg.Roll>) and giant 800px ghost background numeral.
+MANDATORY HERO COMPONENT ARCHETYPES (Plan one for every shot's 'visualIdea'):
+1. [Trajectory & Camera Follow]: 1400px SVG graph path / area chart with dynamic camera POV zoom into peak, camera follows the entity badge along its descent/trajectory, zoom-out reveals full graph context, secondary symbols (money/currency $ signs, injection flow, rescue markers) flow into entity.
+2. [Dual Comparison Board]: 2 large floating glassmorphic comparison cards (width: 700px each) comparing models, eras, or options with brand badges, metric rows, and an animated coral focus frame (<mg.FocusFrame>).
+3. [Ranked Bar / Milestone Timeline]: Baseline line with 3-4 thick vertical bars or milestone date pillars shooting up with spring physics, rolling numbers atop each bar (<mg.Roll>), and winner singled out.
+4. [System & Capital Flow Mesh]: 6-8 system/pipeline node pills linked by curved bezier lines with glowing traveling pulse packets and sonar pulse rings.
+5. [Bento Metric Dossier]: 3-4 structured large metric slabs filling the frame with rolling counters (<mg.Roll>), percentage rings, and status tags.
+6. [Query & Inspection Trace]: Search/terminal input typing out query character-by-character with 3-4 cascading result cards, or dossier table with floating magnifier reticle.
+7. [Bespoke Iconic Entity Graphic]: When a company, vehicle, currency, hardware, or subject is discussed (Amazon, plane, helicopter, Iron Man arc reactor / armor tech, battery, chip, dollar/money, server):
+   CRITICAL RULE: DO NOT plan complex anatomical humanoid drawings (no multi-joint finger/knee bezier meshes). Instead, plan an ICONIC, HIGH-IMPACT VECTOR BADGE, EMBLEM, SILHOUETTE, or SCHEMATIC with motion telemetry, glowing HUD rings, and dynamic camera choreography.
 
-SUBJECT & ENTITY SVG AWARENESS DIRECTIVE (CRITICAL):
-Listen closely to the spoken words and transcript. Whenever a concrete entity, subject, vehicle, character, or object is mentioned (e.g., an airplane, a helicopter, Iron Man, a satellite, a drone, a computer chip, a robot, a lock, an engine, etc.), you MUST plan a custom vector SVG for that subject as the scene's hero!
-Do not reduce scenes about real objects into generic cards or bars when a visual SVG representation will tell the story 10x better. For example:
-- If discussing aviation or flight -> plan a sleek vector jet or helicopter SVG banking through vector clouds with speed trails.
-- If discussing Iron Man or armor/suit technology -> plan an iconic vector helmet/chest arc-reactor SVG with glowing energy pulses and telemetry overlays.
-- If discussing security -> plan a high-tech vector shield or digital padlock SVG unlocking with glowing circuit traces.
-- If discussing data centers or cloud -> plan a vector server monolith with blinking LED nodes and beam sweeps.
-Describe the exact visual SVG in 'visualIdea' so the art director and code workers will author it in full vector fidelity.
+SELECTIVE & PURPOSEFUL SVG USAGE DIRECTIVE (CRITICAL):
+- DO NOT force an SVG into every shot. SVGs must be used SELECTIVELY and PURPOSEFULLY: only when visually showing the concrete object or symbol directly anchors the core narrative point (e.g. showing an Amazon logo at the peak of a graph, or an Arc Reactor / battery pack when explaining the physical energy constraint, or money/dollar signs when explaining funding).
+- Target a balanced rhythm: approximately 1 out of every 2 or 3 shots (~30–40%) features a hero illustrative vector SVG/emblem to ground the narrative meaning.
+- The remaining 60–70% of shots MUST rely on clean, elegant motion graphics:
+  - Trajectory / line charts showing performance and trends
+  - Split comparison boards (Old vs New, Light vs Dark, Option A vs B)
+  - Bento metric grids and KPI slabs with rolling numerals (<mg.Roll>)
+  - Connected system flow conduits with traveling pulse packets
+  - Ranked milestone bar charts and timelines
+  - Terminal inspection and query dossiers
+- Never force an SVG for abstract concepts or minor incidental words. Only use an SVG when it gives the viewer immediate, unambiguous clarity on what is being discussed.
+- When an SVG is used, keep it clean and iconic (e.g. 5–15 clean SVG elements, recognizable silhouette or emblem) — just enough visual detail so the viewer immediately grasps the complete meaning without visual clutter or anatomical distortion.
 
 WORD ALIGNMENT IS SACRED:
-The provided word list has global integer frame starts, spoken ends, pause frames, and ASR confidence. Use those global word indices for emphasis. Never invent or rewrite the spoken transcript. Never output float timestamps. Shot boundaries are sentence indices only; the runtime derives all frame times.
+Use global word indices for emphasis. Never invent or rewrite the spoken transcript. Never output float timestamps. Shot boundaries are sentence indices only.
 
 NARRATIVE RULES:
 - All sentences covered exactly once, in order, without overlap or gaps.
@@ -979,8 +979,8 @@ Return a complete storyboard for sentences ${first}..${last}. Use each of those 
 
   // Output budget scales with the range so long films are never truncated mid-plan.
   const sentenceCount = last - first + 1;
-  const estimatedShots = Math.max(2, Math.ceil(sentenceCount / 1.4));
-  const maxTokens = Math.min(100000, 40000 + estimatedShots * 400);
+  const estimatedShots = Math.max(2, Math.ceil(sentenceCount / 2.2));
+  const maxTokens = Math.min(16000, 4000 + estimatedShots * 250);
 
   return structured<CreativePlanOutput>(CREATIVE_PLAN_SCHEMA, system, prompt, {
     model: getEnv().plannerModel || getEnv().model,
@@ -989,65 +989,68 @@ Return a complete storyboard for sentences ${first}..${last}. Use each of those 
   });
 }
 
+/** Helper to format word cues concisely to save 85%+ prompt tokens */
+function formatCompactWordCues(words: WordCue[]): string {
+  return words.map((w) => `[W${w.wordIndex} f${w.startFrame}-${w.spokenEndFrame} "${w.text}"]`).join(" ");
+}
+
 /** Stage 3: expand each storyboard beat into a precise art-direction/code prompt. */
 export async function generateShotVisualPrompt(args: {
-  shot: CreativeShotPlan;
+  shot: CreativeShotPlan & { durationFrames?: number };
   wordCues: WordCue[];
   filmNorthStar: string;
   continuityRules: string[];
   previousSummary: string;
   nextSummary: string;
 }): Promise<ShotVisualPrompt> {
-  const system = `You are a senior motion-graphics art director writing one precise visual construction prompt for a Remotion 2D animator.
+  const durationFrames = args.shot.durationFrames ?? (args.wordCues.length ? Math.max(120, args.wordCues.at(-1)!.spokenEndFrame + 30) : 180);
+  const system = `You are a senior motion-graphics art director writing a visual choreography prompt for a Remotion 2D animator.
+AESTHETIC: High-impact documentary, thriller, and explainer motion design (Vox, Johnny Harris, Magnates Media, ColdFusion).
 
-AESTHETIC: Fast, broadcast-quality 2D motion graphics (1920x1080 @ 60fps).
+DOCUMENTARY & EXPLAINER VISUAL LANGUAGE:
+1. SPATIAL STAGE & CAMERA CHOREOGRAPHY:
+   - Every shot takes place on an animated spatial stage (e.g. trajectory chart, comparison board, network map, timeline, or schematic blueprint).
+   - Choreograph dynamic camera movement:
+     - POV Macro Zoom: start zoomed into the hero badge, peak, or key data point.
+     - Camera Follow / Tracking: camera smoothly tracks the subject moving along its path (e.g. an entity falling down a graph line).
+     - Wide Pullback: camera zooms out to reveal the full graph, historical trajectory, and surrounding data context.
+     - Secondary Action: animate secondary elements (such as glowing currency/money $ symbols, rescue markers, or injection flows) traveling into the hero entity.
 
-MANDATORY HERO COMPONENT (NO TEXT-ONLY SCENES):
-- The scene MUST be dominated by a LARGE ANIMATED VISUAL COMPONENT filling 65% to 85% of the 1920x1080 comp.
-- Text is kept compact at top-left (e.g. <mg.Heading kicker='...' title='...' frameAt={2} style={{ position: 'absolute', left: 100, top: 70 }} />).
-- Specify the exact large component architecture, dimensions, and layout:
-  - e.g., "Large 800x600px bespoke vector SVG of an airplane / helicopter / Iron Man armor helmet centered at (960, 540) with multi-layered paths, thruster glow, and animated speed trails"
-  - e.g., "Two 720x420px floating comparison cards tilted -2° and +2° with metric tiles and an animated coral focus frame"
-  - e.g., "1400x520px ranked bar chart with 3 bars shooting up from a baseline with glowing winner spotlight"
-  - e.g., "1400x500px SVG line chart with gradient underfill, pen path, and peak callout"
-  - e.g., "1500x550px 8-node connected network mesh with curved bezier lines and traveling pulse packets"
-  - e.g., "1400x620px 3-block bento metric grid with rolling numbers and status tags"
-  - e.g., "Terminal search bar typing out query with 3 cascading result cards"
+2. SELECTIVE & PURPOSEFUL SVG ART DIRECTION:
+   - Check if this shot truly requires an illustrative entity SVG to make the spoken point understandable:
+     - If YES: detail a clean, iconic vector emblem, logo, silhouette, or schematic (e.g. Amazon logo badge, dollar currency symbol, jet silhouette, battery cell, Arc Reactor) and how it sits within the spatial stage. Keep it clear, iconic, and focused (no hyper-detailed meshes) — just enough for the viewer to immediately understand the meaning.
+     - If NO: focus the art direction on pristine motion graphics (floating cards, trend curves, rolling metrics, connected node meshes, dossiers) without inventing unnecessary decorative illustrations.
 
-FAST ANIMATION TIMING (From Demo Reel):
-- Frame 2–6: Hero component starts entering immediately with snappy spring physics (stiffness: 160, damping: 14).
-- Frame 8–18: Internal tiles, bars, or nodes reveal with quick 4-frame staggers.
-- Frame 16–26: Focus callout frame (<mg.FocusFrame>) or winner highlight pops around the key metric.
-- Continuous: Subtle camera push (<mg.CameraRig zoom={1.03}>) and traveling pulses.
+3. KINETIC TIMING:
+   - Frame 2–6: Hero component starts entering immediately with snappy spring physics.
+   - Sync key motion events and camera shifts to local word cues. All primary reveals complete by the cue's spokenEndFrame.`;
 
-SUBJECT & ENTITY SVG ART DIRECTION:
-When the shot features a narrative subject (like a plane, helicopter, Iron Man, drone, robot, satellite, vehicle, device, or tool):
-- Detail the exact SVG construction: viewBox (e.g. 0 0 800 600), primary silhouette paths, internal accent paths, highlight gradients, and glow filters (<filter id="mgGlow">).
-- Choreograph its kinetic behavior: entrance spring (stiffness: 160, damping: 14), continuous breathing or floating motion (e.g. translateY with Math.sin, banking rotate with Math.sin), trailing speed particles or shockwave rings, and callout focus markers (<mg.Marker>, <mg.FocusFrame>).
-- Ensure it anchors 65% to 85% of the comp as the undeniable visual hero of the scene!
-
-Tie animation events to the provided local word indexes. All important motion reveals must complete by the cue's spokenEndFrame.`;
-  const prompt = `FILM NORTH STAR: ${args.filmNorthStar}
-CONTINUITY RULES: ${args.continuityRules.join("; ")}
-PREVIOUS SHOT VISUAL (avoid copying): ${args.previousSummary || "opening shot"}
-NEXT SHOT VISUAL (set up without repeating): ${args.nextSummary || "film ending"}
+  const prompt = `FILM CONTINUITY:
+- Style: ${args.filmNorthStar}
+- Palette & Rules: ${args.continuityRules.join("; ")}
+- Previous Shot: ${args.previousSummary || "opening"}
+- Next Shot: ${args.nextSummary || "ending"}
 
 SHOT STORYBOARD:
-${JSON.stringify(args.shot, null, 2)}
+- Shot ID: ${args.shot.shotId} | Frames: ${durationFrames} (${(durationFrames / 60).toFixed(1)}s)
+- Spoken Line: "${args.shot.spokenText}"
+- Visual Metaphor & Idea: ${args.shot.visualIdea}
+- Visual Family: ${args.shot.visualFamily} | Theme: ${args.shot.themeMode}
 
-EXACT LOCAL WORD CUES (local frames; 60fps):
-${wordTable(args.wordCues)}
+LOCAL WORD CUES (local frames; 60fps):
+${formatCompactWordCues(args.wordCues)}
 
-Write a render-ready prompt detailed enough that another model can independently code the scene without guessing.`;
+Write a concise, render-ready prompt detailing composition, iconic visual metaphor, dynamic camera moves, and voice-synced reveals.`;
+
   return structured<ShotVisualPrompt>(VISUAL_PROMPT_SCHEMA, system, prompt, {
     temperature: 0.45,
-    maxTokens: 8192,
+    maxTokens: 2000,
   });
 }
 
 /** Stage 4 worker: generate a distinct, complete Remotion composition for one shot. */
 export async function generateRemotionShotCode(args: {
-  shot: CreativeShotPlan;
+  shot: CreativeShotPlan & { durationFrames?: number };
   visualPrompt: ShotVisualPrompt;
   wordCues: WordCue[];
   filmContinuity: { palette: string; typography: string; texture: string; rules: string[] };
@@ -1056,137 +1059,86 @@ export async function generateRemotionShotCode(args: {
   validationError?: string;
   retryNumber?: number;
 }): Promise<GeneratedCodeOutput> {
-  const system = `You are an elite motion-graphics engineer and Remotion/React developer.
-You author bespoke, high-precision TSX Remotion shot components for a 1920x1080 @ 60fps video engine.
+  const durationFrames = args.shot.durationFrames ?? (args.wordCues.length ? Math.max(120, args.wordCues.at(-1)!.spokenEndFrame + 30) : 180);
+  const system = `You are an elite motion-graphics engineer authoring bespoke Remotion TSX components for a documentary, thriller, and explainer video engine (1920x1080 @ 60fps).
+Your benchmark: Vox, Johnny Harris, Magnates Media, ColdFusion, and Bloomberg Quicktake.
 
-VISUAL STANDARD — FAST, BROADCAST-GRADE 2D TECH MOTION GRAPHICS:
-Your output must look like a scene from an Apple/OpenAI keynote or the demo reel:
+VISUAL STANDARD — DOCUMENTARY & EXPLAINER MOTION GRAPHICS:
+1. SPATIAL STAGE & DYNAMIC CAMERA CHOREOGRAPHY:
+   - Every shot takes place on an animated spatial canvas (trend chart, comparison board, network map, timeline, or blueprint).
+   - CAMERA MOVES (POV & TRACKING): Drive camera motion using interpolate() on frame with <mg.CameraRig zoom={...} x={...} y={...}> or a transformed container.
+     Example (User's Amazon / Stock Fall & Rescue Choreography):
+     - Start zoomed in close (zoom: 1.5–1.8, focused POV on the entity badge or graph peak).
+     - As narrative shifts (e.g. losing peak, falling, crisis), the camera tracks the entity moving downward along the trajectory line.
+     - Zoom out (zoom: 1.0, x: 0, y: 0) to reveal the macro trend, surrounding data markers, and historical context.
+     - When a subsequent event occurs (e.g. borrowing money, rescue), animate secondary elements (e.g. floating $ currency icons, injection arrows, glowing relief nodes) flowing into the entity!
 
-1. MANDATORY HERO COMPONENT (STRICT ANTI-TEXT-ONLY RULE):
-   - A scene that is just <h1>, <p>, or <mg.WordCue> text with a background is a COMPLETE FAILURE.
-   - 65% to 85% of the 1920x1080 screen MUST be occupied by a LARGE, ANIMATED VISUAL COMPONENT.
-   - Text is strictly for a compact top-left heading: <mg.Heading kicker="..." title="..." frameAt={2} style={{ position: "absolute", left: 100, top: 70, maxWidth: 1100 }} />.
-   - The entire center and bottom of the comp (y: 200 to 1000) belongs to the hero component!
+2. SELECTIVE & PURPOSEFUL SVGs (NOT EVERYWHERE, JUST ENOUGH TO GROUND MEANING):
+   - Only draw an illustrative SVG if the visual prompt specifically calls for an entity/symbol (e.g. Amazon logo badge, dollar/money icon, battery cell, jet silhouette) to explain that specific point.
+   - If the shot is about comparisons, trends, systems, or metrics, DO NOT force an arbitrary drawing. Instead, build a pristine motion graphic using <mg.Card>, <mg.Stroke>, <mg.Roll>, <mg.FocusFrame>, <mg.GridBackground>, and clean HTML/React UI elements.
+   - When an illustrative SVG IS called for:
+     - Keep it clean, iconic, and uncluttered (5 to 15 well-structured SVG elements: clean <path>, <circle>, <rect>, <polygon>, <linearGradient>).
+     - Give the viewer just enough visual fidelity to understand the complete meaning instantly — never overloaded, never distracting.
+     - Strictly NO complex humanoid body drawings with fingers/knees (prevents distorted anatomy).
 
-2. FAST ANIMATION TIMING (From the Reference Demo Reel):
-   - Components enter FAST: animation starts at frame 2 to 6 (no waiting).
-   - Snappy spring physics: spring({ frame: frame - delay, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } }).
-   - Fast item staggers: 4 to 6 frames between cards/bars/nodes.
-   - Focus callouts: <mg.FocusFrame frameAt={18} color="#FF5500" borderRadius={16}> popping around key metrics with spring physics.
-   - Smooth continuous camera push: <mg.CameraRig zoom={interpolate(frame, [0, durationInFrames], [1, 1.04], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}>.
+3. PROVEN EXPLAINER SCENE ARCHETYPES:
+   A. Trajectory & Camera Follow (The Amazon / Trend Archetype):
+      - 1400px SVG graph path with gradient underfill.
+      - Entity badge (company logo, vehicle, or token) anchored to current (x, y) along the curve.
+      - Camera tracks from peak POV -> follows plunge -> zooms out to reveal full trajectory -> money/solution symbols flow in.
+   B. Dual Comparison Board:
+      - 2 floating glass cards (e.g., Old vs New, Peak vs Collapse, Competitor A vs B) with metric badges, differential delta (+45% / -60%), and <mg.FocusFrame>.
+   C. Ranked Bar / Milestone Timeline:
+      - Baseline line with milestone pillars or date bars (e.g., 2003, 2008, 2020) springing up with rolling counters (<mg.Roll>) and highlight pin.
+   D. Connected System / Network Flow:
+      - Nodes linked by glowing curved bezier paths with traveling pulse packets (<mg.Stroke> or dashed offset) showing capital flow, data transfer, or supply chain.
+   E. Bento Metric Dossier:
+      - Documentary dossier / investigative grid with rolling numbers, status pills, and high-contrast callout boxes.
+   F. Blueprint / Telemetry Schematic:
+      - Technical schematic layout with crosshair markers (<mg.Marker>), circular HUD rings, and annotated dimension callouts.
 
-3. CHOOSE AND BUILD ONE OF THESE PROVEN DEMO COMPONENT ARCHETYPES:
+4. ANIMATION TIMING & VOICE LOCK:
+   - Fast initial reveal: Entrance starts at frame 2–6 with snappy spring physics (stiffness: 160, damping: 14).
+   - Word sync: Key reveals and camera shifts trigger precisely when narration speaks the word (frame >= cue.startFrame).
+   - Smooth interpolation: interpolate(frame, [start, end], [from, to], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }).
 
-   ARCHETYPE A: BESPOKE NARRATIVE VECTOR SVG (Vehicles, Characters, Devices, Real-World Objects)
-   - When the shot describes a concrete entity (e.g. plane, helicopter, Iron Man, drone, satellite, robot, tool, chip, engine):
-   - Layout: Centered large vector container (width: 700-1100px, height: 500-750px) at comp center (x: 400-600px, y: 220-300px).
-   - SVG Construction:
-     - Use a well-proportioned <svg viewBox="0 0 800 600" width={800} height={600} style={{ overflow: "visible" }}>.
-     - Multi-layered vector design: base silhouette with deep fills or linear gradients (<linearGradient>), secondary panel lines with stroke and strokeDasharray, highlighted edges, thruster/energy glow with filter="url(#mgGlow)", and glowing accent rings.
-     - You have full access to standard SVG tags: <defs>, <linearGradient>, <radialGradient>, <path d="..." />, <rect>, <circle>, <ellipse>, <polygon>, <g>.
-   - Kinetic Physics:
-     - Entrance: spring entrance scaling from 0.7 to 1.0 with subtle overshoot:
-       const enterSpring = spring({ frame: frame - 4, fps, config: { damping: 14, stiffness: 160 } });
-     - Lifelike Hover/Float: subtle continuous floating using Math.sin(frame * 0.05) * 12 on translateY, and subtle banking Math.sin(frame * 0.03) * 3 on rotate.
-     - Energy/Trail Effects: trailing SVG stroke lines (<mg.Stroke>) or pulsing circles (<circle r={...} opacity={...} />).
-     - Framing: Add technical HUD markers (<mg.Marker x={...} y={...} variant="cross" />) and metric badges around the SVG to give it a broadcast tech aesthetic.
-
-   ARCHETYPE B: DUAL COMPARISON CARDS (SplitComparison from Demo)
-   - Layout: Two large floating cards (<mg.Card width={700} height={420} tilt={-2} mode="light"> and <mg.Card width={700} height={420} tilt={2} mode="dark">) positioned side-by-side or overlapping at center (top: 260px).
-   - Content: Brand/product icon badge + title, micro-tags, row of 2-3 metric tiles (Context, Input, Output), and <mg.FocusFrame> around the winning metric!
-   - Animation: Card 1 springs in at frame 4, Card 2 springs in at frame 9, focus box pops at frame 18.
-
-   ARCHETYPE C: RANKED BAR COMPARISON (BarComparison from Demo)
-   - Layout: Baseline line drawn at y: 860 (<line x1={160} x2={1760} y1={860} y2={860} stroke="rgba(255,255,255,0.2)" strokeWidth={3} />).
-   - 3 to 4 massive bars (width: 240px, heights: 300-520px) shooting up from baseline:
-     const barH = spring({ frame: frame - (10 + i * 6), fps, config: { damping: 14, stiffness: 150 } }) * targetH;
-   - Bold number on top of each bar, label below baseline. Winner bar highlighted with accent color, glow, and side callout odometer.
-
-   ARCHETYPE D: SVG LINE CHART STORY (ChartStory from Demo)
-   - Layout: 1400x500px SVG chart centered at top: 280px. 4 horizontal grid lines with numbers.
-   - Path curve drawn with <mg.Stroke d="..." strokeWidth={6} color="#0066FF" durationFrames={36} />.
-   - Area fill gradient underneath with linearGradient.
-   - Glowing pen dot tracking current path head. Pinned callout pin at peak with <mg.Roll to={maxVal} />.
-
-   ARCHETYPE E: CONNECTED SYSTEM NETWORK (NetworkMesh from Demo)
-   - Layout: 6 to 8 node pills arranged in columns (e.g. Input, Planner, Workers, Validator) across 1500px width.
-   - Curved SVG bezier connector paths (<path d="M... C..." fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth={3} />).
-   - Animated traveling pulse packets (<path d="..." stroke="#0066FF" strokeWidth={8} filter="url(#mgGlow)" strokeDasharray="0.08 2" strokeDashoffset={-((frame * 0.02) % 1)} />).
-   - Sonar pulse rings around active nodes.
-
-   ARCHETYPE F: BENTO METRIC GRID (BentoBadgeCluster from Demo)
-   - Layout: 3 to 4 large styled metric blocks filling the screen (e.g. 2 top cards width: 680px, 1 wide bottom card width: 1400px).
-   - Backgrounds in contrasting dark/light/accent colors, rounded corners (20px).
-   - Large rolling numerals (<mg.Roll fontSize={110} />), progress rings, uppercase label tags.
-
-   ARCHETYPE G: QUERY TRACE & TERMINAL (QueryTrace & MagnifierInspect from Demo)
-   - Layout: Search/terminal input box with animated typing query: query.slice(0, Math.floor(frame * 0.8)).
-   - 3 large cascading result cards (width: 1400px) flying in at frames 12, 18, 24 with confidence score bars and rank tags.
-
-CRITICAL VECTOR & STORYTELLING DIRECTIVE:
-- When a real-world object or entity is discussed (airplane, helicopter, Iron Man, drone, satellite, robot, hardware), EMBRACE IT! Write rich, handcrafted, multi-path inline SVGs that clearly represent the subject with clean geometric, aerodynamic, or iconic styling.
-- DO NOT default to a generic blank card or text paragraph when a concrete object is in the speech.
-- Use clean vector shapes (<path d="..." />, <rect>, <circle>, <polygon>, <linearGradient>) combined with high-tech HUD accents, glowing filters, and fluid Remotion spring motion.
-
-OUTPUT RULES & COMPILATION CONTRACT:
-1. IMPORTS: Include only these exact imports:
-   import React from "react";
-   import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig, interpolate, spring, Easing, random, Img } from "remotion";
-   import { mg } from "@frame60/mg";
-
-2. EXPORT: Exactly one exported component named GeneratedShot:
-   export const GeneratedShot = (props) => { ... };
-   props receives: { shotPlan, visualPrompt, wordCues, continuity, assets }
-
-3. REMOTION HOOKS & TIMING:
-   - Must call:
+5. REMOTION CODE CONTRACT:
+   - Imports:
+     import React from "react";
+     import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig, interpolate, spring, Easing, random } from "remotion";
+     import { mg } from "@frame60/mg";
+   - Export:
+     export const GeneratedShot = (props) => { ... };
+   - Inside:
      const frame = useCurrentFrame();
      const { fps, width, height, durationInFrames } = useVideoConfig();
      const cues = props.wordCues || [];
-   - Frame timing is local to this shot (starts at frame 0).
-   - Motion must be driven mathematically from frame using interpolate(frame, [start, end], [from, to], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) or spring().
-   - Never use CSS keyframe animations, CSS transitions, setTimeout, setInterval, Date, or Math.random (use Remotion random(seed)).
+   - Compact top-left documentary heading:
+     <mg.Heading kicker="DOCUMENTARY DOSSIER" title="Headline" frameAt={2} style={{ position: "absolute", left: 100, top: 70, maxWidth: 1100 }} />
+   - Center / Stage:
+     Use <mg.CameraRig zoom={zoom} x={panX} y={panY}> for camera moves, or a root container with transform.
+   - Clean TSX only. No external URLs, no browser window/document globals, no Markdown backticks inside the sourceCode string.`;
 
-4. AVAILABLE @frame60/mg PRIMITIVES:
-   - <mg.GridBackground mode="dark" /> : subtle grid lines on dark/light canvas (alias: <mg.Grid>)
-   - <mg.Heading kicker="category" title="Headline" frameAt={2} style={{ position: "absolute", left: 100, top: 70 }} />
-   - <mg.Card width={700} height={420} tilt={-2} mode="dark" frameAt={4}>{children}</mg.Card> : large floating UI card
-   - <mg.FocusFrame frameAt={18} color="#FF5500" borderRadius={16}>{children}</mg.FocusFrame> : animated callout focus box (alias: <mg.Callout>)
-   - <mg.WordCue cue={cue} emphasis={boolean} emphasisColor="#0066FF">{cue.text}</mg.WordCue> : voice-synced word reveal with subtle rise and blur
-   - <mg.CueProgress cue={cue} width={240} color="#0066FF" /> : progress bar synced to word spoken duration
-   - <mg.Roll to={number} from={0} fontSize={90} color="#fff" /> : animated rolling numeral
-   - <mg.Stroke d="M..." width={w} height={h} color="#0066FF" durationFrames={36} /> : trim-path animated SVG path (alias: mg.Sweep)
-   - <mg.CameraRig zoom={1.03} x={0} y={0}>{children}</mg.CameraRig> : camera pan/push container
-   - <mg.ImpactLine text="Headline" frameAt={0} size={72} color="#fff" /> : bold kinetic text slam
-   - <mg.Marker x={100} y={100} color="#0066FF" variant="cross" /> : architectural crosshair/dot marker
-   - <mg.Noise opacity={0.035} /> : subtle procedural texture overlay
+  const compactCues = formatCompactWordCues(args.wordCues);
 
-5. ALLOWED TAGS & ATTRIBUTES:
-   - Standard SVG: <svg>, <g>, <path>, <rect>, <circle>, <ellipse>, <line>, <polyline>, <polygon>, <defs>, <marker>, <linearGradient>, <radialGradient>, <clipPath>, <mask>, <text>, <tspan>, <pattern>, <symbol>, <use>, <metadata>, <title>, <desc>
-   - Standard HTML text: <div>, <span>, <p>, <h1>..<h6>, <code>, <pre>, <strong>, <em>, <ul>, <ol>, <li>
-   - Absolutely NO external URLs (no http:// or https:// image links; render all visuals with SVG paths, gradients, shapes, or typography).
-   - Absolutely NO browser globals: no window, document, fetch, localStorage, WebSocket, eval.
+  const prompt = `${args.validationError ? `RETRY ${args.retryNumber ?? 1}. Fix this exact error:\n${args.validationError}\n\n` : ""}SHOT DIRECTION:
+- Shot ID: ${args.shot.shotId} | Duration: ${durationFrames} frames (${(durationFrames / 60).toFixed(1)}s)
+- Spoken Narration: "${args.shot.spokenText}"
+- Visual Theme: ${args.shot.themeMode || "dark"} | Family: ${args.shot.visualFamily || "editorial"}
+- Visual Metaphor: ${args.visualPrompt.visualMetaphor || args.shot.visualIdea}
+- Composition: ${args.visualPrompt.composition || "Hero entity centered with dynamic camera tracking"}
+- Camera Choreography: ${args.visualPrompt.cameraChoreography || "Smooth POV zoom/pan tracking key entity"}
+- Key Elements: ${(args.visualPrompt.elements || []).join(", ")}
+- Word Cues (local frame sync):
+${compactCues}
 
-6. RETURN FORMAT:
-   Return clean, valid TypeScript JSX. No markdown backticks inside the sourceCode string property.`;
-  const prompt = `${args.validationError ? `RETRY ${args.retryNumber ?? 1}. The previous component failed validation. Fix the exact error below; keep the art direction, do not simplify to a template:\n${args.validationError}\n\n` : ""}FILM CONTINUITY KIT:
-${JSON.stringify(args.filmContinuity, null, 2)}
+Palette: ${args.filmContinuity.palette || "slate, cyan, white"}
+Typography: ${args.filmContinuity.typography || "Inter, system-ui"}
 
-PREVIOUS SHOT (composition to differ from): ${args.previousSummary || "opening"}
-NEXT SHOT (avoid anticipating its exact composition): ${args.nextSummary || "ending"}
+Return a fully authored Remotion TSX module in sourceCode. Focus on crisp documentary motion design, dynamic camera tracking, and iconic vector symbols without anatomical drawing complexity.`;
 
-PLANNER SHOT:
-${JSON.stringify(args.shot, null, 2)}
-
-PRECISE VISUAL PROMPT:
-${JSON.stringify(args.visualPrompt, null, 2)}
-
-WORD CUES:
-${JSON.stringify(args.wordCues)}
-
-Return a fully authored Remotion TSX module in sourceCode. The visualSummary should describe the rendered composition (not the prompt); designChoices should list 3-6 distinctive visual decisions.`;
   return structured<GeneratedCodeOutput>(GENERATED_CODE_SCHEMA, system, prompt, {
     temperature: 0.2,
-    maxTokens: 16384,
+    maxTokens: 3200,
   });
 }

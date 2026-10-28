@@ -13,7 +13,7 @@ import { ARCHETYPE_META, FAMILY_INFO } from "./variety/taxonomy";
 import { Studio } from "./components/Studio";
 import { ProjectsDashboard } from "./components/ProjectsDashboard";
 import { SettingsDialog } from "./components/SettingsDialog";
-import { getProjects, getActiveProjectId, setActiveProjectId, createProject } from "./services/projects";
+import { getProjects, getActiveProjectId, setActiveProjectId, createProject, initProjectsSync } from "./services/projects";
 import { getEnvStatus } from "./services/env";
 import { useTheme } from "./hooks/useTheme";
 import { Moon, Sun } from "lucide-react";
@@ -291,6 +291,20 @@ export default function App() {
   const { isDark, toggle: toggleTheme } = useTheme();
   const envStatus = getEnvStatus();
 
+  // On mount: sync all disk projects into memory and restore active/latest project
+  useEffect(() => {
+    let alive = true;
+    void initProjectsSync().then((resolvedId) => {
+      if (alive && resolvedId) {
+        setActiveId(resolvedId);
+        setRefreshKey((k) => k + 1);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   useEffect(() => {
     // deep-link: #studio, #projects, #demo
     const hash = window.location.hash.replace("#", "");
@@ -330,7 +344,7 @@ export default function App() {
             <NavTab active={view === "landing"} onClick={() => { setView("landing"); window.location.hash = "demo"; window.scrollTo({ top: 0 }); }}>Demo & Docs</NavTab>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <span className="hidden sm:inline font-mono text-[11px] text-[color:var(--color-text-faint)]">{getProjects().length} project{getProjects().length !== 1 ? "s" : ""} · local</span>
+            <span className="hidden sm:inline font-mono text-[11px] text-[color:var(--color-text-faint)]">{getProjects().length} project{getProjects().length !== 1 ? "s" : ""} · disk</span>
             <button
               onClick={toggleTheme}
               aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
@@ -348,7 +362,7 @@ export default function App() {
               <span>{envStatus.activeRoute === "route1" ? "AgentRouter" : "HCNSEC"}</span>
               <span className="text-[10px] opacity-60 font-mono">({envStatus.codeConcurrency}x)</span>
             </button>
-            <button onClick={() => goStudio(null)} className="px-4 py-1.5 rounded-full bg-[#0066FF] text-white text-xs font-semibold hover:bg-[#0052cc]">New Film +</button>
+            <button onClick={handleCreateNew} className="px-4 py-1.5 rounded-full bg-[#0066FF] text-white text-xs font-semibold hover:bg-[#0052cc]">New Film +</button>
           </div>
         </div>
       </div>

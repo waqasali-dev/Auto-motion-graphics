@@ -24,7 +24,7 @@ const FPS = 60;
 const MAX_RETRIES = 3;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const REF_STYLE =
-  "The quality reference is premium 2D broadcast tech motion design (1920x1080 @ 60fps): sleek floating comparison cards, metric tiles with animated callout focus frames, bento badge grids, kinetic typography with word-synced reveals, animated data charts/bars, connected node systems, and bespoke vector SVG illustrations of narrative subjects on subtle dark/light grid canvases. Clean, broadcast-grade 2D vector layouts with expressive custom SVG art for concrete objects mentioned in speech.";
+  "Premium documentary, thriller, and explainer motion design (1920x1080 @ 60fps): sleek trajectory charts with camera tracking and POV zoom, floating comparison cards with focus frames, bento metric dossiers, connected capital/system flow meshes, and purposeful iconic vector emblems and badges where needed to anchor meaning. Cinematic, broadcast-grade 2D spatial layouts.";
 
 export interface CreativePipelineInput {
   title: string;
@@ -118,8 +118,8 @@ function validatePlan(
     const spoken = raw.sentences.slice(shot.sentenceStartIndex, shot.sentenceEndIndex + 1);
     const seconds = spoken.reduce((sum, s) => sum + s.end - s.start, 0);
     // A single long sentence cannot be split further. Multi-sentence shots should stay reasonably paced.
-    if (seconds > 22.0 && spoken.length > 1) {
-      errors.push(`${shot.shotId} is ${seconds.toFixed(1)}s across ${spoken.length} sentences; split it so each shot stays near 8–15s.`);
+    if (seconds > 24.0 && spoken.length > 1) {
+      errors.push(`${shot.shotId} is ${seconds.toFixed(1)}s across ${spoken.length} sentences; split it so each shot stays near 10–18s.`);
     }
     if (shot.spokenText.trim().length < 3) errors.push(`${shot.shotId} has no spoken line.`);
     if (shot.visualIdea.trim().length < 18) errors.push(`${shot.shotId} needs a specific transcript-grounded visual idea.`);
@@ -308,10 +308,10 @@ async function smokeShot(source: string, props: GeneratedSceneProps, durationFra
   }
 }
 
-/** Roughly how many beats a set of sentences will become (content-driven, never fixed). */
+/** Roughly how many beats a set of sentences will become in documentary pacing (12–18s per beat). */
 function estimateShotCount(sentences: RawTranscriptJSON["sentences"]): number {
   const seconds = sentences.reduce((sum, s) => sum + (s.end - s.start), 0);
-  return Math.max(1, Math.round(seconds / 11));
+  return Math.max(1, Math.round(seconds / 15));
 }
 
 /**
@@ -320,9 +320,9 @@ function estimateShotCount(sentences: RawTranscriptJSON["sentences"]): number {
  * never overflow, while shot count still follows the content.
  */
 function buildPlanWindows(sentences: RawTranscriptJSON["sentences"]): Array<{ start: number; end: number }> {
-  // Target 45 seconds per window (≈ 8-14 sentences, 4-6 shots per call).
-  // Keeps LLM inference time under 40s, preventing gateway timeouts and lengthy reasoning pauses.
-  const TARGET_WINDOW_SECONDS = 45;
+  // Target 75 seconds per window (≈ 15-22 sentences, 4-6 shots per call in documentary pacing).
+  // Reduces total planning API calls by 50% while keeping inference fast and within token budget.
+  const TARGET_WINDOW_SECONDS = 75;
   const total = sentences.reduce((sum, s) => sum + (s.end - s.start), 0);
   if (!sentences.length) return [];
   if (total <= TARGET_WINDOW_SECONDS * 1.35) return [{ start: 0, end: sentences.length - 1 }];

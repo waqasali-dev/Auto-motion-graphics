@@ -1,8 +1,8 @@
 // src/components/ProjectsDashboard.tsx
-// Local-first project manager — no DB, no server. All in browser storage.
+// Local project manager saved to disk in projects/*.json
 
 import { useEffect, useState } from "react";
-import { getProjects, deleteProject, duplicateProject, setActiveProjectId, getActiveProjectId, formatDuration, type Project } from "../services/projects";
+import { getProjectsAsync, deleteProject, duplicateProject, setActiveProjectId, getActiveProjectId, formatDuration, type Project, syncProjectToDisk } from "../services/projects";
 import { FilmStage } from "../mg/stage";
 import { ARCHETYPE_REGISTRY } from "../sdk/registry";
 import { GeneratedFilmPoster } from "./GeneratedFilmPlayer";
@@ -12,7 +12,9 @@ export function ProjectsDashboard({ onOpen, onCreateNew, refreshKey }: { onOpen:
   const [projects, setProjects] = useState<Project[]>([]);
   const [filter, setFilter] = useState("");
 
-  const reload = () => setProjects(getProjects());
+  const reload = () => {
+    void getProjectsAsync().then(setProjects);
+  };
   useEffect(() => { reload(); }, [refreshKey]);
   useEffect(() => {
     const onStorage = () => reload();
@@ -32,9 +34,9 @@ export function ProjectsDashboard({ onOpen, onCreateNew, refreshKey }: { onOpen:
     <div className="max-w-[1400px] mx-auto px-6 md:px-12 py-10">
       <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
         <div>
-          <div className="font-mono text-[11px] tracking-[0.3em] uppercase text-[#0066FF]">Local Projects · No DB · In Browser</div>
+          <div className="font-mono text-[11px] tracking-[0.3em] uppercase text-[#0066FF]">Repository Projects · projects/*.json</div>
           <h2 className="text-3xl font-bold tracking-tight mt-1">Your Films</h2>
-          <p className="text-sm text-[color:var(--color-text-faint)] mt-1">All projects live in this browser. Audio is stored in IndexedDB, metadata in localStorage. Export a project to share it.</p>
+          <p className="text-sm text-[color:var(--color-text-faint)] mt-1">All projects are saved directly into the project repository in JSON format (<code className="font-mono text-xs">projects/*.json</code>). Audio is stored on disk alongside project files.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -48,7 +50,8 @@ export function ProjectsDashboard({ onOpen, onCreateNew, refreshKey }: { onOpen:
               try {
                 const j = JSON.parse(await f.text());
                 const imported = { ...j, id: `proj_${Date.now()}_${Math.random().toString(36).slice(2,4)}`, createdAt: Date.now(), updatedAt: Date.now() } as Project;
-                const all = JSON.parse(localStorage.getItem("frame60_projects_v2") || "[]"); all.unshift(imported); localStorage.setItem("frame60_projects_v2", JSON.stringify(all)); reload();
+                await syncProjectToDisk(imported);
+                reload();
               } catch {}
               e.target.value = "";
             }} />
