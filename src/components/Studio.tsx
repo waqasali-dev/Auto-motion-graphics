@@ -443,8 +443,8 @@ export function Studio({
   const estimatedSeconds = audioDuration || (wordCount ? Math.max(8, wordCount / 2.45) : 0);
   const canGenerate = apiReady && !processing && !aligning && (!!audioFile || !!rawTranscript || transcriptText.trim().length >= 4);
   const hasInput = !!audioFile || !!rawTranscript || transcriptText.trim().length > 0;
-  // Shot count is derived from documentary pacing (12-18s per shot)
-  const estimatedShots = estimatedSeconds ? Math.max(1, Math.round(estimatedSeconds / 15)) : 0;
+  // Shot count is derived from broadcast pacing (7-11s per shot)
+  const estimatedShots = estimatedSeconds ? Math.max(1, Math.round(estimatedSeconds / 9.8)) : 0;
   const isLongForm = estimatedSeconds > 200;
 
   return (

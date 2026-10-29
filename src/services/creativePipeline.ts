@@ -118,8 +118,8 @@ function validatePlan(
     const spoken = raw.sentences.slice(shot.sentenceStartIndex, shot.sentenceEndIndex + 1);
     const seconds = spoken.reduce((sum, s) => sum + s.end - s.start, 0);
     // A single long sentence cannot be split further. Multi-sentence shots should stay reasonably paced.
-    if (seconds > 24.0 && spoken.length > 1) {
-      errors.push(`${shot.shotId} is ${seconds.toFixed(1)}s across ${spoken.length} sentences; split it so each shot stays near 10–18s.`);
+    if (seconds > 16.0 && spoken.length > 1) {
+      errors.push(`${shot.shotId} is ${seconds.toFixed(1)}s across ${spoken.length} sentences; split it so each shot stays near 7–11s.`);
     }
     if (shot.spokenText.trim().length < 3) errors.push(`${shot.shotId} has no spoken line.`);
     if (shot.visualIdea.trim().length < 18) errors.push(`${shot.shotId} needs a specific transcript-grounded visual idea.`);
@@ -308,10 +308,10 @@ async function smokeShot(source: string, props: GeneratedSceneProps, durationFra
   }
 }
 
-/** Roughly how many beats a set of sentences will become in documentary pacing (12–18s per beat). */
+/** Roughly how many beats a set of sentences will become in broadcast motion pacing (7–11s per beat). */
 function estimateShotCount(sentences: RawTranscriptJSON["sentences"]): number {
   const seconds = sentences.reduce((sum, s) => sum + (s.end - s.start), 0);
-  return Math.max(1, Math.round(seconds / 15));
+  return Math.max(1, Math.round(seconds / 9.8));
 }
 
 /**
@@ -320,9 +320,9 @@ function estimateShotCount(sentences: RawTranscriptJSON["sentences"]): number {
  * never overflow, while shot count still follows the content.
  */
 function buildPlanWindows(sentences: RawTranscriptJSON["sentences"]): Array<{ start: number; end: number }> {
-  // Target 75 seconds per window (≈ 15-22 sentences, 4-6 shots per call in documentary pacing).
-  // Reduces total planning API calls by 50% while keeping inference fast and within token budget.
-  const TARGET_WINDOW_SECONDS = 75;
+  // Target 52 seconds per window (≈ 10-14 sentences, 5-6 shots per call in broadcast pacing).
+  // Matches the reference demo reel density while staying within the $5–$6 film budget.
+  const TARGET_WINDOW_SECONDS = 52;
   const total = sentences.reduce((sum, s) => sum + (s.end - s.start), 0);
   if (!sentences.length) return [];
   if (total <= TARGET_WINDOW_SECONDS * 1.35) return [{ start: 0, end: sentences.length - 1 }];

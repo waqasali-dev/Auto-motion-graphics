@@ -899,14 +899,14 @@ PRIMARY VISUAL AESTHETIC — CINEMATIC EXPLAINER & DOCUMENTARY MOTION DESIGN:
 - Text is supporting copy ONLY (a compact 1-line headline + kicker at top-left).
 - Dynamic camera choreography: POV zoom-in, tracking pan along trajectory/graph, and zoom-out context reveals.
 
-DYNAMIC SCENE COUNT & PACING (DOCUMENTARY & EXPLAINER STANDARD):
-- Shot count MUST scale with the audio duration:
-  - ~30 seconds of audio -> 2 to 3 scenes
-  - ~60 seconds (1 min) -> 4 to 6 scenes
-  - ~120 seconds (2 mins) -> 8 to 11 scenes
-  - ~240 seconds (4 mins) -> 14 to 18 scenes
-  - ~480 seconds (8 mins) -> 28 to 36 scenes
-- Target 12 to 18 seconds per scene: gives camera choreography, tracking, and contextual reveals time to breathe (never drag beyond 22s unless a single long sentence).
+DYNAMIC SCENE COUNT & PACING (BROADCAST MOTION GRAPHICS STANDARD):
+- Shot count MUST scale with the audio duration (7 to 11 seconds per scene):
+  - ~30 seconds of audio -> 3 to 4 scenes
+  - ~60 seconds (1 min) -> 6 to 8 scenes
+  - ~120 seconds (2 mins) -> 12 to 15 scenes
+  - ~240 seconds (4 mins) -> 24 to 28 scenes
+  - ~480 seconds (8 mins) -> 48 to 56 scenes
+- Target 7 to 11 seconds per scene: snappy, broadcast-quality motion graphics pacing matching the demo reel (never drag beyond 14s unless a single long sentence).
 
 MANDATORY HERO COMPONENT ARCHETYPES (Plan one for every shot's 'visualIdea'):
 1. [Trajectory & Camera Follow]: 1400px SVG graph path / area chart with dynamic camera POV zoom into peak, camera follows the entity badge along its descent/trajectory, zoom-out reveals full graph context, secondary symbols (money/currency $ signs, injection flow, rescue markers) flow into entity.
@@ -979,8 +979,8 @@ Return a complete storyboard for sentences ${first}..${last}. Use each of those 
 
   // Output budget scales with the range so long films are never truncated mid-plan.
   const sentenceCount = last - first + 1;
-  const estimatedShots = Math.max(2, Math.ceil(sentenceCount / 2.2));
-  const maxTokens = Math.min(16000, 4000 + estimatedShots * 250);
+  const estimatedShots = Math.max(2, Math.ceil(sentenceCount / 1.5));
+  const maxTokens = Math.min(24000, 6000 + estimatedShots * 350);
 
   return structured<CreativePlanOutput>(CREATIVE_PLAN_SCHEMA, system, prompt, {
     model: getEnv().plannerModel || getEnv().model,
@@ -1005,24 +1005,28 @@ export async function generateShotVisualPrompt(args: {
 }): Promise<ShotVisualPrompt> {
   const durationFrames = args.shot.durationFrames ?? (args.wordCues.length ? Math.max(120, args.wordCues.at(-1)!.spokenEndFrame + 30) : 180);
   const system = `You are a senior motion-graphics art director writing a visual choreography prompt for a Remotion 2D animator.
-AESTHETIC: High-impact documentary, thriller, and explainer motion design (Vox, Johnny Harris, Magnates Media, ColdFusion).
+AESTHETIC BENCHMARK: Premium broadcast-quality documentary, thriller, and tech keynote motion design matching the reference demo reel.
 
-DOCUMENTARY & EXPLAINER VISUAL LANGUAGE:
-1. SPATIAL STAGE & CAMERA CHOREOGRAPHY:
-   - Every shot takes place on an animated spatial stage (e.g. trajectory chart, comparison board, network map, timeline, or schematic blueprint).
-   - Choreograph dynamic camera movement:
-     - POV Macro Zoom: start zoomed into the hero badge, peak, or key data point.
-     - Camera Follow / Tracking: camera smoothly tracks the subject moving along its path (e.g. an entity falling down a graph line).
-     - Wide Pullback: camera zooms out to reveal the full graph, historical trajectory, and surrounding data context.
-     - Secondary Action: animate secondary elements (such as glowing currency/money $ symbols, rescue markers, or injection flows) traveling into the hero entity.
+MASTERCLASS VISUAL ART DIRECTION REQUIREMENTS:
+1. SPATIAL STAGE & DYNAMIC CAMERA CHOREOGRAPHY:
+   - Every shot takes place on an animated spatial stage (trajectory chart, comparison board, network map, timeline, or dossier).
+   - Direct continuous camera motion using <mg.CameraRig>:
+     - POV Macro Zoom: start zoomed in tight (zoom: 1.5–1.8) focusing on a hero badge, peak, or key metric.
+     - Follow & Tracking: smoothly pan the camera following an entity moving along a trajectory or across nodes.
+     - Wide Pullback: zoom out to reveal the full macro system, surrounding data markers, and historical context.
+     - Ambient Drift: subtle continuous scale push (zoom: 1.0 -> 1.05) or slow pan across the scene.
 
-2. SELECTIVE & PURPOSEFUL SVG ART DIRECTION:
+2. ATMOSPHERIC DEPTH & VISUAL LAYERING:
+   - Direct rich atmosphere: multi-stop gradient background, radial spotlight lighting, subtle grid (<mg.GridBackground>), procedural noise (<mg.Noise>), and architectural crosshair markers (<mg.Marker>).
+   - Large hero visuals: giant ghost background numerals (fontSize: 800-1100), floating tilted cards (<mg.Card tilt={-2}>), rolling counters (<mg.Roll>), and glowing callout frames (<mg.FocusFrame>).
+
+3. SELECTIVE & PURPOSEFUL SVG USAGE:
    - Check if this shot truly requires an illustrative entity SVG to make the spoken point understandable:
      - If YES: detail a clean, iconic vector emblem, logo, silhouette, or schematic (e.g. Amazon logo badge, dollar currency symbol, jet silhouette, battery cell, Arc Reactor) and how it sits within the spatial stage. Keep it clear, iconic, and focused (no hyper-detailed meshes) — just enough for the viewer to immediately understand the meaning.
      - If NO: focus the art direction on pristine motion graphics (floating cards, trend curves, rolling metrics, connected node meshes, dossiers) without inventing unnecessary decorative illustrations.
 
-3. KINETIC TIMING:
-   - Frame 2–6: Hero component starts entering immediately with snappy spring physics.
+4. KINETIC TIMING & VOICE LOCK:
+   - Frame 2–6: Hero component starts entering immediately with snappy spring physics (damping: 14, stiffness: 160).
    - Sync key motion events and camera shifts to local word cues. All primary reveals complete by the cue's spokenEndFrame.`;
 
   const prompt = `FILM CONTINUITY:
@@ -1044,7 +1048,7 @@ Write a concise, render-ready prompt detailing composition, iconic visual metaph
 
   return structured<ShotVisualPrompt>(VISUAL_PROMPT_SCHEMA, system, prompt, {
     temperature: 0.45,
-    maxTokens: 2000,
+    maxTokens: 3000,
   });
 }
 
@@ -1061,46 +1065,52 @@ export async function generateRemotionShotCode(args: {
 }): Promise<GeneratedCodeOutput> {
   const durationFrames = args.shot.durationFrames ?? (args.wordCues.length ? Math.max(120, args.wordCues.at(-1)!.spokenEndFrame + 30) : 180);
   const system = `You are an elite motion-graphics engineer authoring bespoke Remotion TSX components for a documentary, thriller, and explainer video engine (1920x1080 @ 60fps).
-Your benchmark: Vox, Johnny Harris, Magnates Media, ColdFusion, and Bloomberg Quicktake.
+Your benchmark: Premium broadcast tech motion design matching the reference demo reel, Apple/OpenAI keynotes, Vox, and ColdFusion.
 
-VISUAL STANDARD — DOCUMENTARY & EXPLAINER MOTION GRAPHICS:
+VISUAL STANDARD — HIGH-IMPACT BROADCAST MOTION GRAPHICS:
 1. SPATIAL STAGE & DYNAMIC CAMERA CHOREOGRAPHY:
-   - Every shot takes place on an animated spatial canvas (trend chart, comparison board, network map, timeline, or blueprint).
-   - CAMERA MOVES (POV & TRACKING): Drive camera motion using interpolate() on frame with <mg.CameraRig zoom={...} x={...} y={...}> or a transformed container.
-     Example (User's Amazon / Stock Fall & Rescue Choreography):
-     - Start zoomed in close (zoom: 1.5–1.8, focused POV on the entity badge or graph peak).
-     - As narrative shifts (e.g. losing peak, falling, crisis), the camera tracks the entity moving downward along the trajectory line.
-     - Zoom out (zoom: 1.0, x: 0, y: 0) to reveal the macro trend, surrounding data markers, and historical context.
-     - When a subsequent event occurs (e.g. borrowing money, rescue), animate secondary elements (e.g. floating $ currency icons, injection arrows, glowing relief nodes) flowing into the entity!
+   - Every shot takes place on an animated spatial stage. Drive cinematic camera motion using interpolate() on frame with <mg.CameraRig zoom={...} x={...} y={...}> or a transformed container.
+   - Dynamic moves:
+     - Macro POV Zoom: Start tight (zoom: 1.4–1.7, focused POV on a peak, badge, or key metric).
+     - Follow Tracking: Camera follows an entity or line moving across the frame.
+     - Context Pullback: Camera zooms out (zoom: 1.0, x: 0, y: 0) to reveal full macro chart/system context.
+     - Continuous Drift: Subtle continuous scale push (zoom: 1.0 -> 1.05) keeps every scene dynamic.
 
-2. SELECTIVE & PURPOSEFUL SVGs (NOT EVERYWHERE, JUST ENOUGH TO GROUND MEANING):
-   - Only draw an illustrative SVG if the visual prompt specifically calls for an entity/symbol (e.g. Amazon logo badge, dollar/money icon, battery cell, jet silhouette) to explain that specific point.
-   - If the shot is about comparisons, trends, systems, or metrics, DO NOT force an arbitrary drawing. Instead, build a pristine motion graphic using <mg.Card>, <mg.Stroke>, <mg.Roll>, <mg.FocusFrame>, <mg.GridBackground>, and clean HTML/React UI elements.
-   - When an illustrative SVG IS called for:
-     - Keep it clean, iconic, and uncluttered (5 to 15 well-structured SVG elements: clean <path>, <circle>, <rect>, <polygon>, <linearGradient>).
-     - Give the viewer just enough visual fidelity to understand the complete meaning instantly — never overloaded, never distracting.
-     - Strictly NO complex humanoid body drawings with fingers/knees (prevents distorted anatomy).
+2. ATMOSPHERE, LIGHTING & DEPTH (MANDATORY IN EVERY SHOT):
+   - Background: Rich multi-stop gradient (e.g. \`linear-gradient(160deg, #070A12 0%, #0F172A 50%, #05070D 100%)\` for dark mode, or \`linear-gradient(160deg, #F4F6F9 0%, #E5EAF2 100%)\` for light mode).
+   - Radial Spotlight: Subtle lighting glow (\`radial-gradient(60% 70% at 75% 25%, rgba(0,102,255,0.14), transparent 70%)\`).
+   - Atmosphere: Always include <mg.Noise opacity={0.04} /> and <mg.GridBackground mode={themeMode} gridSize={48} />.
+   - Architectural Accents: Add crosshair markers <mg.Marker x={120} y={120} variant="cross" color="#0066FF" /> at corner positions.
 
-3. PROVEN EXPLAINER SCENE ARCHETYPES:
-   A. Trajectory & Camera Follow (The Amazon / Trend Archetype):
-      - 1400px SVG graph path with gradient underfill.
-      - Entity badge (company logo, vehicle, or token) anchored to current (x, y) along the curve.
-      - Camera tracks from peak POV -> follows plunge -> zooms out to reveal full trajectory -> money/solution symbols flow in.
-   B. Dual Comparison Board:
-      - 2 floating glass cards (e.g., Old vs New, Peak vs Collapse, Competitor A vs B) with metric badges, differential delta (+45% / -60%), and <mg.FocusFrame>.
-   C. Ranked Bar / Milestone Timeline:
-      - Baseline line with milestone pillars or date bars (e.g., 2003, 2008, 2020) springing up with rolling counters (<mg.Roll>) and highlight pin.
-   D. Connected System / Network Flow:
-      - Nodes linked by glowing curved bezier paths with traveling pulse packets (<mg.Stroke> or dashed offset) showing capital flow, data transfer, or supply chain.
-   E. Bento Metric Dossier:
-      - Documentary dossier / investigative grid with rolling numbers, status pills, and high-contrast callout boxes.
-   F. Blueprint / Telemetry Schematic:
-      - Technical schematic layout with crosshair markers (<mg.Marker>), circular HUD rings, and annotated dimension callouts.
+3. SIX MASTERCLASS COMPONENT RECIPES FROM THE DEMO REEL:
+   A. Trajectory & Trend Chart (ChartStory Recipe):
+      - 1400x520px SVG chart path centered on screen with subtle horizontal gridlines and Y-axis scale numbers.
+      - Dual-stroke curve: Glowing background stroke (strokeWidth={16} opacity={0.35} filter="url(#mgSoft)") + crisp inner line (strokeWidth={6} stroke="#0066FF").
+      - Area underfill with <linearGradient> and dynamic clipPath tracking path head.
+      - Pinned peak callout marker with pulsing sonar ring (<circle r={14 + Math.sin(frame*0.2)*8} opacity={0.4} />) and floating stat card with <mg.Roll> and <mg.FocusFrame>.
+      - Camera tracks pen head and pulls back to wide view.
+   B. Kinetic Hero with Ghost Numeral & Expanding Capsule (KineticHero Recipe):
+      - Giant ghost background number (fontSize: 850–1100, WebkitTextStroke: "2px rgba(0,102,255,0.12)", transform translateX drift).
+      - Foreground expanding capsule pill with spring physics, -2deg tilt, colored drop shadow (0 35px 80px rgba(0,102,255,0.35)), and <mg.Roll fontSize={90} color="#fff" /> inside.
+      - Bold kinetic typography (<mg.ImpactLine>) with word-synced rises.
+   C. Connected System Network Mesh (NetworkMesh Recipe):
+      - 6 to 8 node pills in columns connected by curved bezier SVG paths (M ... C ...).
+      - Animated traveling glow packets (strokeDasharray="0.08 2" strokeDashoffset={-((frame * 0.02) % 1)} filter="url(#mgGlow)").
+      - Concentric sonar pulse rings expanding from hub nodes (<circle r={r + ring * 46} opacity={(1 - ring) * 0.5} />).
+   D. Dual Tilted Comparison Cards (SplitComparison Recipe):
+      - Two large floating cards (<mg.Card width={680} height={420} tilt={-2} mode="dark"> and <mg.Card width={680} height={420} tilt={2} mode="light">).
+      - Brand/product badges, metric rows, differential deltas (+45% / -60%), and <mg.FocusFrame color="#FF5500" borderRadius={16}> popping on frame 18 with spring physics.
+   E. Bento Metric Dossier & Data Matrix:
+      - 3 to 4 structured large metric slabs filling the frame with rolling counters (<mg.Roll fontSize={96}>), circular progress rings, status tags, and crosshair markers.
+   F. Selective Iconic Entity Graphic:
+      - When an entity/symbol is discussed (Amazon, plane, helicopter, Iron Man arc reactor / armor tech, battery, chip, dollar/money):
+      - Clean, iconic vector emblem/badge (5 to 15 clean SVG elements) in a glassmorphic container, integrated with camera tracking.
+      - Strictly NO complex humanoid body drawings with fingers/knees (prevents distorted anatomy).
 
 4. ANIMATION TIMING & VOICE LOCK:
-   - Fast initial reveal: Entrance starts at frame 2–6 with snappy spring physics (stiffness: 160, damping: 14).
+   - Snappy spring physics: spring({ frame: frame - delay, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } }).
+   - Fast item staggers: 4–6 frames between elements.
    - Word sync: Key reveals and camera shifts trigger precisely when narration speaks the word (frame >= cue.startFrame).
-   - Smooth interpolation: interpolate(frame, [start, end], [from, to], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }).
 
 5. REMOTION CODE CONTRACT:
    - Imports:
@@ -1135,10 +1145,10 @@ ${compactCues}
 Palette: ${args.filmContinuity.palette || "slate, cyan, white"}
 Typography: ${args.filmContinuity.typography || "Inter, system-ui"}
 
-Return a fully authored Remotion TSX module in sourceCode. Focus on crisp documentary motion design, dynamic camera tracking, and iconic vector symbols without anatomical drawing complexity.`;
+Return a fully authored Remotion TSX module in sourceCode. Deliver high-impact visual depth, multi-layered atmosphere, dynamic camera choreography, and masterclass motion graphics matching the demo reel.`;
 
   return structured<GeneratedCodeOutput>(GENERATED_CODE_SCHEMA, system, prompt, {
     temperature: 0.2,
-    maxTokens: 3200,
+    maxTokens: 6000,
   });
 }
