@@ -908,6 +908,32 @@ DYNAMIC SCENE COUNT & PACING (BROADCAST MOTION GRAPHICS STANDARD):
   - ~480 seconds (8 mins) -> 48 to 56 scenes
 - Target 7 to 11 seconds per scene: snappy, broadcast-quality motion graphics pacing matching the demo reel (never drag beyond 14s unless a single long sentence).
 
+─── VISUAL COMPLEMENTATION DIRECTIVE (CRITICAL — PLAN WHAT TO SHOW) ───
+For EVERY shot, you MUST ask: "What visual will make the viewer UNDERSTAND this narration point better than just hearing it?"
+Your 'visualIdea' field MUST include a "BECAUSE ..." justification explaining WHY this visual helps the viewer understand.
+
+CONTENT-TO-VISUAL MAPPING PATTERNS (use the best match):
+- Numbers, statistics, money amounts → Rolling counter slabs, bar charts, metric dossiers, percentage rings
+  Example: "Revenue hit $12B" → Kinetic hero with giant ghost numeral 12 and expanding capsule with <mg.Roll> BECAUSE the viewer needs to feel the scale of the number
+- Comparisons (old vs new, before/after, A vs B) → Dual comparison cards side-by-side with differential deltas
+  Example: "The old model vs the new one" → Two floating glassmorphic cards with feature rows BECAUSE side-by-side contrast makes the difference instantly clear
+- Processes, systems, pipelines, supply chains → Connected node mesh with traveling glow packets
+  Example: "Data flows from servers to users" → 6-node connected mesh with bezier flow lines BECAUSE the viewer needs to see how components connect
+- Growth, decline, trajectory, history → Trajectory chart with camera following the curve
+  Example: "Amazon was at its peak, then crashed" → SVG trajectory chart, camera zoomed into peak, follows descent, zooms out to show full history BECAUSE the viewer needs to see the shape of the journey
+- Concrete entities (companies, products, tech, vehicles) → Iconic badge/emblem/silhouette on a spatial stage
+  Example: "The Arc Reactor powers the suit" → Clean Arc Reactor emblem glowing inside a HUD reticle BECAUSE the viewer needs to see what is being described
+- International travel, transatlantic/pacific journeys, geopolitics, global trade, corporate expansion, supply chains → Pre-built world map (<mg.MapStage>) with animated parabolic route (<mg.MapRoute>), city beacons (<mg.MapCity>), and country highlights (<mg.MapHighlight>)
+  Example: "From the UK to America, the expansion began" → <mg.MapStage> tracking a glowing transatlantic arc from London to New York with country highlights BECAUSE the viewer needs spatial geography to grasp distance and international scale
+- Lists, features, capabilities → Bento grid of metric slabs with staggered reveals
+  Example: "It has weapons, flight, armor, and sensors" → 4 bento metric slabs with icons staggering in BECAUSE the viewer needs to see each capability individually
+- Questions, searches, investigations → Terminal/query trace with cascading result cards
+  Example: "Why did this fail?" → Search terminal typing the question, result cards cascading below BECAUSE it mirrors the investigative tone
+- Cause and effect, dependencies → Flow diagram or timeline with milestone markers
+  Example: "Because batteries are heavy, flight time is limited" → Timeline with battery weight milestone leading to flight-time bar BECAUSE causality needs sequential visual proof
+- Abstract ideas, themes, moods → Atmospheric kinetic typography with spatial depth (giant ghost text, expanding capsules)
+  Example: "Imagine the possibilities" → Giant ghost numeral with drifting kinetic text BECAUSE pure atmosphere carries abstract mood better than forced illustrations
+
 MANDATORY HERO COMPONENT ARCHETYPES (Plan one for every shot's 'visualIdea'):
 1. [Trajectory & Camera Follow]: 1400px SVG graph path / area chart with dynamic camera POV zoom into peak, camera follows the entity badge along its descent/trajectory, zoom-out reveals full graph context, secondary symbols (money/currency $ signs, injection flow, rescue markers) flow into entity.
 2. [Dual Comparison Board]: 2 large floating glassmorphic comparison cards (width: 700px each) comparing models, eras, or options with brand badges, metric rows, and an animated coral focus frame (<mg.FocusFrame>).
@@ -917,6 +943,8 @@ MANDATORY HERO COMPONENT ARCHETYPES (Plan one for every shot's 'visualIdea'):
 6. [Query & Inspection Trace]: Search/terminal input typing out query character-by-character with 3-4 cascading result cards, or dossier table with floating magnifier reticle.
 7. [Bespoke Iconic Entity Graphic]: When a company, vehicle, currency, hardware, or subject is discussed (Amazon, plane, helicopter, Iron Man arc reactor / armor tech, battery, chip, dollar/money, server):
    CRITICAL RULE: DO NOT plan complex anatomical humanoid drawings (no multi-joint finger/knee bezier meshes). Instead, plan an ICONIC, HIGH-IMPACT VECTOR BADGE, EMBLEM, SILHOUETTE, or SCHEMATIC with motion telemetry, glowing HUD rings, and dynamic camera choreography.
+8. [Geographic Map & Tactical Route]: When international travel, flights, global trade, corporate expansion, military movements, or international infrastructure are discussed (e.g. from UK to America, across the Atlantic/Pacific, Asian manufacturing to US market):
+   CRITICAL RULE: DO NOT attempt to draw raw geographic map SVG paths by hand. Use the built-in <mg.MapStage> vector cartography suite with dynamic camera tracking along flight arcs (<mg.MapRoute from="..." to="...">), pulsing sonar city beacons (<mg.MapCity name="...">), and country isolation glows (<mg.MapHighlight country="...">).
 
 SELECTIVE & PURPOSEFUL SVG USAGE DIRECTIVE (CRITICAL):
 - DO NOT force an SVG into every shot. SVGs must be used SELECTIVELY and PURPOSEFULLY: only when visually showing the concrete object or symbol directly anchors the core narrative point (e.g. showing an Amazon logo at the peak of a graph, or an Arc Reactor / battery pack when explaining the physical energy constraint, or money/dollar signs when explaining funding).
@@ -938,7 +966,7 @@ NARRATIVE RULES:
 - All sentences covered exactly once, in order, without overlap or gaps.
 - Diverse visual families across the acts.
 - No adjacent repeat of the same visualFamily; no more than 2 consecutive shots from the same family.
-- Every shot's 'visualIdea' MUST state the component archetype and what large animated visual component is shown.`;
+- Every shot's 'visualIdea' MUST state the component archetype, what large animated visual component is shown, and include "BECAUSE ..." explaining why this visual complements the narration.`;
 
   const w = args.window;
   const first = w ? w.sentenceStart : 0;
@@ -1008,24 +1036,38 @@ export async function generateShotVisualPrompt(args: {
 AESTHETIC BENCHMARK: Premium broadcast-quality documentary, thriller, and tech keynote motion design matching the reference demo reel.
 
 MASTERCLASS VISUAL ART DIRECTION REQUIREMENTS:
-1. SPATIAL STAGE & DYNAMIC CAMERA CHOREOGRAPHY:
+
+1. PREMIUM VISUAL FINISH (MANDATORY — THE DIFFERENCE BETWEEN "CHEAP" AND "BROADCAST"):
+   - Rounded corners: ALL card, panel, slab, and container elements MUST use borderRadius: 20–28px. Never use sharp corners on any visible rectangular element.
+   - Rich saturated color palette: Use vibrant, confident accent colors (electric blue #0066FF, coral #FF5A36, emerald #10B981, amber #F59E0B, violet #8B5CF6). Avoid flat gray-on-gray or washed-out pastels.
+   - Colored glow shadows: Every floating card/slab gets boxShadow with colored glow: "0 20px 60px rgba(0,102,255,0.25)" for blue elements, "0 20px 60px rgba(255,90,54,0.2)" for coral, etc.
+   - Glassmorphic containers: Important containers use backdrop-filter: blur(14px), background: rgba(15,23,42,0.85), border: 1px solid rgba(255,255,255,0.10). This creates the premium frosted-glass depth.
+   - Depth layering (back to front): Rich gradient background → <mg.GridBackground> → Radial spotlight → Glassmorphic containers with content → <mg.Noise> overlay. All 5 layers in every shot.
+
+2. SPATIAL STAGE & SAFE CAMERA CHOREOGRAPHY:
    - Every shot takes place on an animated spatial stage (trajectory chart, comparison board, network map, timeline, or dossier).
+   ─── SAFE ZONE RULES (CRITICAL — PREVENTS CONTENT OVERFLOW) ───
+   - All hero content MUST be positioned within the SAFE ZONE: x: 100–1820, y: 80–1000 at rest (zoom=1).
+   - Maximum zoom: 1.3 (NEVER exceed 1.3). At zoom=1.3, content at x=1500 appears at x=1500*1.3=1950 — nearly offscreen. So at zoom=1.3, keep all content within x: 200–1700, y: 120–900.
+   - Camera pan (x/y offsets) must be conservative: x range ±120px, y range ±80px.
+   - MENTAL OVERFLOW TEST: Before directing any camera move, calculate: (element_x + cam_x) * zoom. If > 1820 or < 100, the content will clip. Adjust.
    - Direct continuous camera motion using <mg.CameraRig>:
-     - POV Macro Zoom: start zoomed in tight (zoom: 1.5–1.8) focusing on a hero badge, peak, or key metric.
-     - Follow & Tracking: smoothly pan the camera following an entity moving along a trajectory or across nodes.
-     - Wide Pullback: zoom out to reveal the full macro system, surrounding data markers, and historical context.
-     - Ambient Drift: subtle continuous scale push (zoom: 1.0 -> 1.05) or slow pan across the scene.
+     - POV Focus Zoom: start at zoom: 1.15–1.3 focusing on a hero badge, peak, or key metric. CENTERED on the focal point.
+     - Follow & Tracking: smoothly pan the camera (x offset ±80px) following an entity. Keep zoom ≤ 1.2 during pans.
+     - Wide Pullback: zoom out to 1.0, x: 0, y: 0 to reveal full context.
+     - Ambient Drift: subtle continuous scale push (zoom: 1.0 -> 1.05) or gentle pan (x: 0 -> 30px). Default for simpler shots.
+     - Geographic Map Tracking: When using <mg.MapStage>, direct camera motion along the route: start focused tightly on the origin city/country (e.g. London / UK at startZoom 2.2), follow the flight arc westward as it draws across the ocean (midZoom 1.4), and settle on the destination (New York / US at endZoom 2.0) with pulsing city beacon and country highlight.
 
-2. ATMOSPHERIC DEPTH & VISUAL LAYERING:
+3. ATMOSPHERIC DEPTH & VISUAL LAYERING:
    - Direct rich atmosphere: multi-stop gradient background, radial spotlight lighting, subtle grid (<mg.GridBackground>), procedural noise (<mg.Noise>), and architectural crosshair markers (<mg.Marker>).
-   - Large hero visuals: giant ghost background numerals (fontSize: 800-1100), floating tilted cards (<mg.Card tilt={-2}>), rolling counters (<mg.Roll>), and glowing callout frames (<mg.FocusFrame>).
+   - Large hero visuals: giant ghost background numerals (fontSize: 800-1100), floating tilted cards (<mg.Card tilt={-2}> with borderRadius: 24px), rolling counters (<mg.Roll>), and glowing callout frames (<mg.FocusFrame>).
 
-3. SELECTIVE & PURPOSEFUL SVG USAGE:
+4. SELECTIVE & PURPOSEFUL SVG USAGE:
    - Check if this shot truly requires an illustrative entity SVG to make the spoken point understandable:
-     - If YES: detail a clean, iconic vector emblem, logo, silhouette, or schematic (e.g. Amazon logo badge, dollar currency symbol, jet silhouette, battery cell, Arc Reactor) and how it sits within the spatial stage. Keep it clear, iconic, and focused (no hyper-detailed meshes) — just enough for the viewer to immediately understand the meaning.
-     - If NO: focus the art direction on pristine motion graphics (floating cards, trend curves, rolling metrics, connected node meshes, dossiers) without inventing unnecessary decorative illustrations.
+     - If YES: detail a clean, iconic vector emblem, logo, silhouette, or schematic (e.g. Amazon logo badge, dollar currency symbol, jet silhouette, battery cell, Arc Reactor) inside a glassmorphic container with rounded corners and colored glow shadow. Keep it clear, iconic, and focused (no hyper-detailed meshes).
+     - If NO: focus the art direction on pristine motion graphics (floating cards with rounded corners, trend curves, rolling metrics, connected node meshes, dossiers) without inventing unnecessary decorative illustrations.
 
-4. KINETIC TIMING & VOICE LOCK:
+5. KINETIC TIMING & VOICE LOCK:
    - Frame 2–6: Hero component starts entering immediately with snappy spring physics (damping: 14, stiffness: 160).
    - Sync key motion events and camera shifts to local word cues. All primary reveals complete by the cue's spokenEndFrame.`;
 
@@ -1067,45 +1109,112 @@ export async function generateRemotionShotCode(args: {
   const system = `You are an elite motion-graphics engineer authoring bespoke Remotion TSX components for a documentary, thriller, and explainer video engine (1920x1080 @ 60fps).
 Your benchmark: Premium broadcast tech motion design matching the reference demo reel, Apple/OpenAI keynotes, Vox, and ColdFusion.
 
+─── PREMIUM VISUAL FINISH (MANDATORY — THIS IS WHAT SEPARATES CHEAP FROM BROADCAST) ───
+A. ROUNDED CORNERS ON EVERYTHING:
+   - Every card, panel, slab, container, metric box, and badge MUST use borderRadius: 20–28px.
+   - Pill-shaped elements use borderRadius: 9999px (fully rounded capsules).
+   - SVG rect elements: rx={20} ry={20}.
+   - NEVER leave any visible rectangular element with sharp 0px corners.
+
+B. RICH SATURATED COLOR PALETTE (NO WASHED-OUT GRAYS):
+   - Primary accent: #0066FF (electric blue) or #3B82F6 (sky blue).
+   - Secondary accents: #FF5A36 (coral), #10B981 (emerald), #F59E0B (amber), #8B5CF6 (violet), #EC4899 (pink).
+   - Text: #F8FAFC (bright white) for dark mode, #0F172A (deep slate) for light mode.
+   - Backgrounds: Deep rich tones, NOT flat #000 or #111. Use #070A12, #0F172A, #1E293B gradients.
+   - EVERY shot must have at least 2 distinct accent colors creating visual richness.
+
+C. COLORED GLOW SHADOWS (DEPTH & PREMIUM FEEL):
+   - Every floating card/slab: boxShadow: "0 20px 60px rgba(0,102,255,0.25), 0 8px 24px rgba(0,0,0,0.4)".
+   - Hero elements: boxShadow with the element's own accent color at 25-35% opacity.
+   - SVG elements: use filter="url(#mgGlow)" or filter="url(#mgSoft)" for soft glow halos.
+
+D. GLASSMORPHIC CONTAINERS (USE ON 1-2 KEY ELEMENTS PER SHOT):
+   - background: "rgba(15,23,42,0.80)" (dark) or "rgba(255,255,255,0.75)" (light).
+   - backdropFilter: "blur(14px)".
+   - border: "1px solid rgba(255,255,255,0.10)" (dark) or "1px solid rgba(0,0,0,0.08)" (light).
+   - borderRadius: 24px.
+   - Combined with colored glow shadow.
+
 VISUAL STANDARD — HIGH-IMPACT BROADCAST MOTION GRAPHICS:
-1. SPATIAL STAGE & DYNAMIC CAMERA CHOREOGRAPHY:
+
+1. SPATIAL STAGE & SAFE CAMERA CHOREOGRAPHY:
    - Every shot takes place on an animated spatial stage. Drive cinematic camera motion using interpolate() on frame with <mg.CameraRig zoom={...} x={...} y={...}> or a transformed container.
-   - Dynamic moves:
-     - Macro POV Zoom: Start tight (zoom: 1.4–1.7, focused POV on a peak, badge, or key metric).
-     - Follow Tracking: Camera follows an entity or line moving across the frame.
-     - Context Pullback: Camera zooms out (zoom: 1.0, x: 0, y: 0) to reveal full macro chart/system context.
-     - Continuous Drift: Subtle continuous scale push (zoom: 1.0 -> 1.05) keeps every scene dynamic.
+   ─── SAFE ZONE ENFORCEMENT (CRITICAL — PREVENTS OVERFLOW/CLIPPING) ───
+   - ALL hero content must be positioned within the SAFE ZONE at rest: x: 100–1820, y: 80–1000.
+   - MAXIMUM zoom value: 1.3. NEVER use zoom values above 1.3 (no 1.4, 1.5, 1.7, 1.8 — these cause content to clip offscreen).
+   - When using zoom > 1.0, content must be centered. At zoom=1.3, the visible area is ~1477×831px centered. Content beyond x:220–1700 or y:125–955 WILL clip.
+   - Camera pan offsets: x range ±120px maximum, y range ±80px maximum. Never combine large pan + large zoom.
+   - MENTAL OVERFLOW CHECK: For every positioned element, verify: (element_position + camera_offset) * zoom stays within 0–1920 (x) and 0–1080 (y). If it doesn't, reposition the element closer to center.
+   - Camera dynamics (within safe limits):
+     - POV Focus Zoom: Start at zoom: 1.15–1.25, centered on the hero element.
+     - Follow Tracking: Pan x: ±60px while keeping zoom ≤ 1.15.
+     - Context Pullback: zoom → 1.0, x → 0, y → 0 to reveal full layout.
+     - Ambient Drift: zoom: 1.0 → 1.05 or x: 0 → 20px. Default for calm shots.
 
-2. ATMOSPHERE, LIGHTING & DEPTH (MANDATORY IN EVERY SHOT):
-   - Background: Rich multi-stop gradient (e.g. \`linear-gradient(160deg, #070A12 0%, #0F172A 50%, #05070D 100%)\` for dark mode, or \`linear-gradient(160deg, #F4F6F9 0%, #E5EAF2 100%)\` for light mode).
-   - Radial Spotlight: Subtle lighting glow (\`radial-gradient(60% 70% at 75% 25%, rgba(0,102,255,0.14), transparent 70%)\`).
-   - Atmosphere: Always include <mg.Noise opacity={0.04} /> and <mg.GridBackground mode={themeMode} gridSize={48} />.
-   - Architectural Accents: Add crosshair markers <mg.Marker x={120} y={120} variant="cross" color="#0066FF" /> at corner positions.
+2. ATMOSPHERE, LIGHTING & DEPTH (MANDATORY 5-LAYER STACK IN EVERY SHOT):
+   Layer 1 — Background: Rich multi-stop gradient (e.g. \`linear-gradient(160deg, #070A12 0%, #0F172A 50%, #05070D 100%)\` for dark, or \`linear-gradient(160deg, #F4F6F9 0%, #E5EAF2 50%, #FAFBFD 100%)\` for light).
+   Layer 2 — Grid: \`<mg.GridBackground mode={themeMode} gridSize={48} />\` — subtle structural grid.
+   Layer 3 — Radial Spotlight: \`<div style={{ position: "absolute", inset: 0, background: "radial-gradient(60% 70% at 70% 30%, rgba(0,102,255,0.12), transparent 70%)" }} />\` — warm directional lighting.
+   Layer 4 — Content: All cards, charts, badges, SVGs, typography — the main visual payload.
+   Layer 5 — Noise Overlay: \`<mg.Noise opacity={0.035} />\` — film grain texture.
+   - Architectural Accents: 2-3 crosshair markers <mg.Marker x={120} y={120} variant="cross" color="#0066FF" /> at corner positions.
 
-3. SIX MASTERCLASS COMPONENT RECIPES FROM THE DEMO REEL:
+3. SEVEN MASTERCLASS COMPONENT RECIPES FROM THE DEMO REEL & CARTOGRAPHY SUITE:
    A. Trajectory & Trend Chart (ChartStory Recipe):
-      - 1400x520px SVG chart path centered on screen with subtle horizontal gridlines and Y-axis scale numbers.
-      - Dual-stroke curve: Glowing background stroke (strokeWidth={16} opacity={0.35} filter="url(#mgSoft)") + crisp inner line (strokeWidth={6} stroke="#0066FF").
+      - 1200x480px SVG chart (smaller than 1400 to stay in safe zone) centered horizontally at x:360, y:280.
+      - Dual-stroke curve: Glowing background stroke (strokeWidth={14} opacity={0.3} filter="url(#mgSoft)") + crisp inner line (strokeWidth={5} stroke="#0066FF").
       - Area underfill with <linearGradient> and dynamic clipPath tracking path head.
-      - Pinned peak callout marker with pulsing sonar ring (<circle r={14 + Math.sin(frame*0.2)*8} opacity={0.4} />) and floating stat card with <mg.Roll> and <mg.FocusFrame>.
-      - Camera tracks pen head and pulls back to wide view.
+      - Pinned peak callout marker with pulsing sonar ring and floating stat card (borderRadius: 24px, glassmorphic, with <mg.Roll> and <mg.FocusFrame>).
+      - Camera starts at zoom: 1.2 centered on peak, tracks to wide zoom: 1.0.
    B. Kinetic Hero with Ghost Numeral & Expanding Capsule (KineticHero Recipe):
-      - Giant ghost background number (fontSize: 850–1100, WebkitTextStroke: "2px rgba(0,102,255,0.12)", transform translateX drift).
-      - Foreground expanding capsule pill with spring physics, -2deg tilt, colored drop shadow (0 35px 80px rgba(0,102,255,0.35)), and <mg.Roll fontSize={90} color="#fff" /> inside.
+      - Giant ghost background number (fontSize: 850–1100, WebkitTextStroke: "2px rgba(0,102,255,0.10)", centered at x: 960).
+      - Foreground expanding capsule pill (borderRadius: 9999px) with spring physics, -2deg tilt, colored drop shadow, and <mg.Roll fontSize={90} color="#fff" /> inside.
       - Bold kinetic typography (<mg.ImpactLine>) with word-synced rises.
    C. Connected System Network Mesh (NetworkMesh Recipe):
-      - 6 to 8 node pills in columns connected by curved bezier SVG paths (M ... C ...).
+      - 5 to 7 node pills (borderRadius: 20px) in columns within x: 200–1700 range.
+      - Connected by curved bezier SVG paths (M ... C ...).
       - Animated traveling glow packets (strokeDasharray="0.08 2" strokeDashoffset={-((frame * 0.02) % 1)} filter="url(#mgGlow)").
-      - Concentric sonar pulse rings expanding from hub nodes (<circle r={r + ring * 46} opacity={(1 - ring) * 0.5} />).
+      - Concentric sonar pulse rings expanding from hub nodes.
    D. Dual Tilted Comparison Cards (SplitComparison Recipe):
-      - Two large floating cards (<mg.Card width={680} height={420} tilt={-2} mode="dark"> and <mg.Card width={680} height={420} tilt={2} mode="light">).
-      - Brand/product badges, metric rows, differential deltas (+45% / -60%), and <mg.FocusFrame color="#FF5500" borderRadius={16}> popping on frame 18 with spring physics.
+      - Two large floating cards (<mg.Card width={660} height={400} tilt={-2} mode="dark"> and <mg.Card width={660} height={400} tilt={2} mode="light">).
+      - Positioned symmetrically: left card at x: 100, right card at x: 1060 (safe zone compliant).
+      - Brand/product badges, metric rows, differential deltas (+45% / -60%), and <mg.FocusFrame color="#FF5A36" borderRadius={16}> popping on frame 18 with spring physics.
    E. Bento Metric Dossier & Data Matrix:
-      - 3 to 4 structured large metric slabs filling the frame with rolling counters (<mg.Roll fontSize={96}>), circular progress rings, status tags, and crosshair markers.
+      - 3 to 4 structured large metric slabs (borderRadius: 24px, glassmorphic background) filling the frame within safe zone.
+      - Rolling counters (<mg.Roll fontSize={96}>), circular progress rings, status tags (borderRadius: 9999px pill), and crosshair markers.
    F. Selective Iconic Entity Graphic:
-      - When an entity/symbol is discussed (Amazon, plane, helicopter, Iron Man arc reactor / armor tech, battery, chip, dollar/money):
-      - Clean, iconic vector emblem/badge (5 to 15 clean SVG elements) in a glassmorphic container, integrated with camera tracking.
+      - When an entity/symbol is discussed:
+      - Clean, iconic vector emblem/badge (5 to 15 clean SVG elements) inside a glassmorphic container (borderRadius: 28px, colored glow shadow), integrated with safe camera tracking (zoom ≤ 1.2).
       - Strictly NO complex humanoid body drawings with fingers/knees (prevents distorted anatomy).
+   G. Geographic World Map & Tactical Route (MapStory Recipe):
+      - Broadcast-grade vector world map (<mg.MapStage theme="dark">).
+      - DO NOT attempt to draw raw geographic map SVG paths by hand. The engine provides pre-projected vector cartography with 100+ cities and countries ("London", "New York", "Washington", "San Francisco", "Tokyo", "Berlin", "Paris", "UK", "US", "China", etc.).
+      - Camera tracking along flight arc:
+        \`\`\`tsx
+        const routeP = spring({ frame: frame - 12, fps, config: { damping: 20, stiffness: 120 } });
+        return (
+          <AbsoluteFill style={{ background: "#060A12" }}>
+            <mg.Heading kicker="GLOBAL LOGISTICS" title="Transatlantic Passage" />
+            <mg.MapStage
+              theme="dark"
+              camera={{
+                trackRoute: { from: "London", to: "New York", progress: routeP },
+                startZoom: 2.2,
+                midZoom: 1.4,
+                endZoom: 2.0,
+              }}
+            >
+              <mg.MapHighlight country="GB" color="#FF5A36" active={frame >= 8} />
+              <mg.MapHighlight country="US" color="#0066FF" active={frame >= 50} />
+              <mg.MapCity name="London" label="LONDON, UK" frameAt={8} color="#FF5A36" />
+              <mg.MapCity name="New York" label="NEW YORK, US" frameAt={52} color="#0066FF" />
+              <mg.MapRoute from="London" to="New York" progress={routeP} color="#0066FF" showBeacon />
+            </mg.MapStage>
+            <mg.Noise opacity={0.035} />
+          </AbsoluteFill>
+        );
+        \`\`\`
+      - Or framing multiple regions: <mg.MapStage camera={{ fit: ["UK", "US"] }} theme="dark"> ... </mg.MapStage>
 
 4. ANIMATION TIMING & VOICE LOCK:
    - Snappy spring physics: spring({ frame: frame - delay, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } }).
@@ -1126,7 +1235,7 @@ VISUAL STANDARD — HIGH-IMPACT BROADCAST MOTION GRAPHICS:
    - Compact top-left documentary heading:
      <mg.Heading kicker="DOCUMENTARY DOSSIER" title="Headline" frameAt={2} style={{ position: "absolute", left: 100, top: 70, maxWidth: 1100 }} />
    - Center / Stage:
-     Use <mg.CameraRig zoom={zoom} x={panX} y={panY}> for camera moves, or a root container with transform.
+     Use <mg.CameraRig zoom={zoom} x={panX} y={panY}> for camera moves (zoom NEVER above 1.3).
    - Clean TSX only. No external URLs, no browser window/document globals, no Markdown backticks inside the sourceCode string.`;
 
   const compactCues = formatCompactWordCues(args.wordCues);

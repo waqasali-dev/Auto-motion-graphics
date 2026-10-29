@@ -14,6 +14,16 @@ import {
   useVideoConfig,
 } from "remotion";
 import type { WordCue } from "../sdk/contract.generated";
+import {
+  MapStage,
+  MapRoute,
+  MapPin,
+  MapCity,
+  MapHighlight,
+  projectGeo,
+  resolveLocation,
+  GEO_LOCATIONS,
+} from "./map";
 
 const clamp = { extrapolateLeft: "clamp" as const, extrapolateRight: "clamp" as const };
 
@@ -141,10 +151,15 @@ export function CameraRig({
   origin?: string;
   style?: CSSProperties;
 }) {
+  // Clamp zoom to prevent content overflow/clipping at edges
+  const safeZoom = Math.min(zoom, 1.35);
+  // Clamp pan offsets to keep content within viewport
+  const safeX = Math.max(-150, Math.min(150, x));
+  const safeY = Math.max(-100, Math.min(100, y));
   return (
     <AbsoluteFill
       style={{
-        transform: `translate(${x}px, ${y}px) scale(${zoom}) rotate(${rotation}deg)`,
+        transform: `translate(${safeX}px, ${safeY}px) scale(${safeZoom}) rotate(${rotation}deg)`,
         transformOrigin: origin,
         ...style,
       }}
@@ -421,6 +436,17 @@ export const mg = Object.freeze({
   interpolate,
   spring,
   Easing,
+  // Cartographic & Map Primitives
+  MapStage,
+  MapRoute,
+  MapPin,
+  MapCity,
+  MapHighlight,
+  geo: {
+    project: projectGeo,
+    resolve: resolveLocation,
+    locations: GEO_LOCATIONS,
+  },
 });
 
 export const REMOTION_CODE_APIS = {

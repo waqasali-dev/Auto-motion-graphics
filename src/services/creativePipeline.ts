@@ -24,7 +24,7 @@ const FPS = 60;
 const MAX_RETRIES = 3;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const REF_STYLE =
-  "Premium documentary, thriller, and explainer motion design (1920x1080 @ 60fps): sleek trajectory charts with camera tracking and POV zoom, floating comparison cards with focus frames, bento metric dossiers, connected capital/system flow meshes, and purposeful iconic vector emblems and badges where needed to anchor meaning. Cinematic, broadcast-grade 2D spatial layouts.";
+  "Premium broadcast documentary, thriller, and explainer motion design (1920x1080 @ 60fps): glassmorphic containers with rounded corners (20-28px), rich saturated accent colors (electric blue, coral, emerald, amber), colored glow drop-shadows, 5-layer atmospheric depth (gradient → grid → spotlight → content → noise), sleek trajectory charts with safe camera tracking (max zoom 1.3), floating comparison cards with focus frames, bento metric dossiers with rolling counters, connected system flow meshes, and purposeful iconic vector emblems where needed. Every visual must complement and clarify what the narration says.";
 
 export interface CreativePipelineInput {
   title: string;
