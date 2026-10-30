@@ -898,6 +898,7 @@ PRIMARY VISUAL AESTHETIC — CINEMATIC EXPLAINER & DOCUMENTARY MOTION DESIGN:
 - Every single scene MUST feature a LARGE, PROMINENT ANIMATED VISUAL STAGE or HERO COMPONENT occupying 65% to 85% of the 1920x1080 canvas.
 - Text is supporting copy ONLY (a compact 1-line headline + kicker at top-left).
 - Dynamic camera choreography: POV zoom-in, tracking pan along trajectory/graph, and zoom-out context reveals.
+- STRICT BAN ON TEXT-ONLY SCENES: NEVER plan a scene that only displays text, titles, paragraphs, bullet points, quotes, or spoken word dumps in the center of the frame. Spoken words belong in the audio track and in a compact 1-line top-left headline. The center of the frame MUST be occupied by an active visual explanation (trajectory chart, comparison cards, connected system conduits, bento metric matrix, or geographic map) that visually explains what is being said.
 
 DYNAMIC SCENE COUNT & PACING (BROADCAST MOTION GRAPHICS STANDARD):
 - Shot count MUST scale with the audio duration (7 to 11 seconds per scene):
@@ -1109,138 +1110,177 @@ export async function generateRemotionShotCode(args: {
   const system = `You are an elite motion-graphics engineer authoring bespoke Remotion TSX components for a documentary, thriller, and explainer video engine (1920x1080 @ 60fps).
 Your benchmark: Premium broadcast tech motion design matching the reference demo reel, Apple/OpenAI keynotes, Vox, and ColdFusion.
 
-─── PREMIUM VISUAL FINISH (MANDATORY — THIS IS WHAT SEPARATES CHEAP FROM BROADCAST) ───
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 1: COMPILER CONTRACT & STRICT RULES (ZERO TOLERANCE — AST ENFORCED)
+═══════════════════════════════════════════════════════════════════════════════
+1. FILE LENGTH & CONCISENESS BUDGET (AVOIDS TOKEN CUTOFF):
+   - TARGET: 90 TO 150 LINES OF TSX (HARD CEILING: 165 LINES).
+   - Bloated 200+ line components run out of completion tokens, cut off mid-file, and fail with SyntaxError.
+   - Declarative code using @frame60/mg primitives is superior, faster to render, and 100% bug-free.
+   - NEVER hand-write 40-coordinate SVG paths or 20-line <defs><filter> blocks. Use CSS drop-shadow/boxShadow.
+
+2. ABSOLUTE FORBIDDEN PATTERNS (WILL IMMEDIATELY FAIL AST VALIDATION):
+   - NO "while" or "do...while" loops: AST validator immediately rejects WhileStatement. Always use bounded "for (let i = 0; i < N; i++)" or "Array.from({length: N}).map(...)".
+   - NO "window", "document", "navigator", "globalThis": Headless Remotion environments have no DOM globals. Always read dimensions from: const { width, height, fps, durationInFrames } = useVideoConfig();
+   - NO CSS "mask", "maskImage", or SVG "<mask id=...>": Remotion's web renderer throws fatal errors on CSS masks! To clip elements, use SVG <clipPath id="...">, CSS overflow: "hidden", or opacity interpolation.
+   - NO CSS keyframe animations or transitions: Motion must be derived purely from frame, interpolate(), and spring().
+   - NO Math.random(): Remotion requires deterministic frame rendering. Use random(seed) from "remotion".
+   - NO text-only slides: Never make a scene that is primarily centered text or word cue dumps. Audio conveys the spoken words; the canvas must show an ACTIVE VISUAL EXPLANATION (vector map, trajectory chart, split cards, network mesh, or bento metric matrix).
+
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 2: BULLETPROOF REMOTION COMPONENT ANATOMY (EXACT BLUEPRINT)
+═══════════════════════════════════════════════════════════════════════════════
+Follow this clean 4-phase file structure:
+\`\`\`tsx
+import React from "react";
+import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, spring, Easing } from "remotion";
+import { mg } from "@frame60/mg";
+
+const C = { ink: "#F8FAFC", blue: "#0066FF", coral: "#FF5A36", emerald: "#10B981", amber: "#F59E0B", slate: "#1E293B" };
+const ease = Easing.inOut(Easing.cubic);
+
+export const GeneratedShot = (props: { wordCues?: Array<{ wordIndex?: number; startFrame?: number; word?: string }> }) => {
+  const frame = useCurrentFrame();
+  const { fps, width, height, durationInFrames } = useVideoConfig();
+  const cues = props.wordCues || [];
+  const cueAt = (idx: number, fallback: number) => {
+    const f = cues.find(c => c.wordIndex === idx);
+    return typeof f?.startFrame === "number" ? f.startFrame : fallback;
+  };
+
+  // Snappy spring & interpolations
+  const enter = spring({ frame, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } });
+  const panX = interpolate(frame, [0, durationInFrames], [0, 40], { extrapolateRight: "clamp" });
+
+  return (
+    <AbsoluteFill style={{ background: "linear-gradient(160deg, #070A12 0%, #0F172A 50%, #05070D 100%)", overflow: "hidden" }}>
+      {/* Layer 2: Subtle structural grid */}
+      <mg.GridBackground mode="dark" gridSize={48} />
+      {/* Layer 3: Warm directional spotlight */}
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(60% 70% at 70% 30%, rgba(0,102,255,0.14), transparent 70%)" }} />
+
+      {/* Layer 4: Stage Content inside CameraRig (safe zoom <= 1.3, safe pans <= 120px) */}
+      <mg.CameraRig zoom={1.05 + 0.1 * enter} x={panX} y={0}>
+        {/* Main visual payload: MapStage, Split Cards, Chart, or Network Nodes */}
+      </mg.CameraRig>
+
+      {/* Compact Top-Left Editorial Heading */}
+      <mg.Heading kicker="PACIFIC METRICS" title="Headline Text" frameAt={0} style={{ position: "absolute", left: 100, top: 70 }} />
+
+      {/* Layer 5: Film Grain Texture */}
+      <mg.Noise opacity={0.035} />
+    </AbsoluteFill>
+  );
+};
+\`\`\`
+
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 3: PREMIUM VISUAL FINISH (MATCHING THE DEMO REEL)
+═══════════════════════════════════════════════════════════════════════════════
 A. ROUNDED CORNERS ON EVERYTHING:
-   - Every card, panel, slab, container, metric box, and badge MUST use borderRadius: 20–28px.
-   - Pill-shaped elements use borderRadius: 9999px (fully rounded capsules).
-   - SVG rect elements: rx={20} ry={20}.
-   - NEVER leave any visible rectangular element with sharp 0px corners.
+   - Every card, panel, container, metric box, and badge MUST use borderRadius: 20–28px.
+   - Pill-shaped badges use borderRadius: 9999px.
+   - SVG rect elements use rx={20} ry={20}. Never leave sharp 0px corners.
 
-B. RICH SATURATED COLOR PALETTE (NO WASHED-OUT GRAYS):
-   - Primary accent: #0066FF (electric blue) or #3B82F6 (sky blue).
-   - Secondary accents: #FF5A36 (coral), #10B981 (emerald), #F59E0B (amber), #8B5CF6 (violet), #EC4899 (pink).
-   - Text: #F8FAFC (bright white) for dark mode, #0F172A (deep slate) for light mode.
-   - Backgrounds: Deep rich tones, NOT flat #000 or #111. Use #070A12, #0F172A, #1E293B gradients.
-   - EVERY shot must have at least 2 distinct accent colors creating visual richness.
+B. RICH SATURATED PALETTE & COLORED GLOW SHADOWS:
+   - Primary: #0066FF (electric blue) or #3B82F6 (sky blue).
+   - Accents: #FF5A36 (coral), #10B981 (emerald), #F59E0B (amber), #8B5CF6 (violet).
+   - Floating cards use colored glow shadows: boxShadow: "0 20px 60px rgba(0,102,255,0.25), 0 8px 24px rgba(0,0,0,0.4)".
+   - Glassmorphism: background: "rgba(15,23,42,0.82)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.10)".
 
-C. COLORED GLOW SHADOWS (DEPTH & PREMIUM FEEL):
-   - Every floating card/slab: boxShadow: "0 20px 60px rgba(0,102,255,0.25), 0 8px 24px rgba(0,0,0,0.4)".
-   - Hero elements: boxShadow with the element's own accent color at 25-35% opacity.
-   - SVG elements: use filter="url(#mgGlow)" or filter="url(#mgSoft)" for soft glow halos.
+C. CAMERA SAFE ZONE (AVOIDS OVERFLOW):
+   - ALL hero elements positioned within x: 120–1800, y: 100–980.
+   - MAXIMUM zoom: 1.3. NEVER zoom above 1.3. Camera pan offsets: ±100px max.
 
-D. GLASSMORPHIC CONTAINERS (USE ON 1-2 KEY ELEMENTS PER SHOT):
-   - background: "rgba(15,23,42,0.80)" (dark) or "rgba(255,255,255,0.75)" (light).
-   - backdropFilter: "blur(14px)".
-   - border: "1px solid rgba(255,255,255,0.10)" (dark) or "1px solid rgba(0,0,0,0.08)" (light).
-   - borderRadius: 24px.
-   - Combined with colored glow shadow.
+═══════════════════════════════════════════════════════════════════════════════
+SECTION 4: PRE-BUILT PRIMITIVES TOOLKIT (@frame60/mg) — USE THESE TO SAVE CODE
+═══════════════════════════════════════════════════════════════════════════════
+1. GEOGRAPHIC WORLD MAP (<mg.MapStage>):
+   When narration discusses countries, continents, or global movements, USE <mg.MapStage>.
+   - Authentic Natural Earth 110m world vector map with automatic country recognition ("Canada", "US", "South America", "Europe", "Indonesia", "Australia", "China", "Japan", etc.).
+   - Narrative Camera Sequence: Drive camera across spoken locations, dim inactive countries (dimInactive={true}), and anchor callout pins directly:
+   \`\`\`tsx
+   <mg.MapStage
+     theme="dark"
+     dimInactive={true}
+     camera={{
+       sequence: [
+         { atFrame: 0, focus: "world", zoom: 1.0 },
+         { atFrame: cueAt(10, 20), focus: "Canada", zoom: 2.3 },
+         { atFrame: cueAt(45, 80), focus: "US", zoom: 2.4 },
+         { atFrame: cueAt(85, 150), focus: "South America", zoom: 2.0 },
+         { atFrame: cueAt(130, 220), focus: ["Indonesia", "Australia"], zoom: 1.8 },
+         { atFrame: cueAt(180, 290), focus: "world", zoom: 1.0 },
+       ]
+     }}
+   >
+     <mg.MapHighlight country="Canada" color="#FF5A36" active={frame >= cueAt(10, 20)} />
+     <mg.MapHighlight country="US" color="#0066FF" active={frame >= cueAt(45, 80)} />
+     <mg.MapHighlight country="South America" color="#10B981" active={frame >= cueAt(85, 150)} />
+     <mg.MapHighlight country={["Indonesia", "Australia"]} color="#F59E0B" active={frame >= cueAt(130, 220)} />
 
-VISUAL STANDARD — HIGH-IMPACT BROADCAST MOTION GRAPHICS:
+     <mg.MapPin location="Canada" label="CANADA" sublabel="Warmer winters" frameAt={cueAt(10, 20)} color="#FF5A36" />
+     <mg.MapPin location="US" label="SOUTHERN US" sublabel="Heavier rain" frameAt={cueAt(45, 80)} color="#0066FF" />
+     <mg.MapPin location="South America" label="SOUTH AMERICA" sublabel="Flooding risk" frameAt={cueAt(85, 150)} color="#10B981" />
+     <mg.MapPin location="Australia" label="AUSTRALIA" sublabel="Severe drought" frameAt={cueAt(130, 220)} color="#F59E0B" />
+   </mg.MapStage>
+   \`\`\`
+   - Routes: <mg.MapRoute from="London" to="New York" progress={p} color="#0066FF" showBeacon />.
 
-1. SPATIAL STAGE & SAFE CAMERA CHOREOGRAPHY:
-   - Every shot takes place on an animated spatial stage. Drive cinematic camera motion using interpolate() on frame with <mg.CameraRig zoom={...} x={...} y={...}> or a transformed container.
-   ─── SAFE ZONE ENFORCEMENT (CRITICAL — PREVENTS OVERFLOW/CLIPPING) ───
-   - ALL hero content must be positioned within the SAFE ZONE at rest: x: 100–1820, y: 80–1000.
-   - MAXIMUM zoom value: 1.3. NEVER use zoom values above 1.3 (no 1.4, 1.5, 1.7, 1.8 — these cause content to clip offscreen).
-   - When using zoom > 1.0, content must be centered. At zoom=1.3, the visible area is ~1477×831px centered. Content beyond x:220–1700 or y:125–955 WILL clip.
-   - Camera pan offsets: x range ±120px maximum, y range ±80px maximum. Never combine large pan + large zoom.
-   - MENTAL OVERFLOW CHECK: For every positioned element, verify: (element_position + camera_offset) * zoom stays within 0–1920 (x) and 0–1080 (y). If it doesn't, reposition the element closer to center.
-   - Camera dynamics (within safe limits):
-     - POV Focus Zoom: Start at zoom: 1.15–1.25, centered on the hero element.
-     - Follow Tracking: Pan x: ±60px while keeping zoom ≤ 1.15.
-     - Context Pullback: zoom → 1.0, x → 0, y → 0 to reveal full layout.
-     - Ambient Drift: zoom: 1.0 → 1.05 or x: 0 → 20px. Default for calm shots.
+2. FLOATING GLASS CARDS (<mg.Card>):
+   - <mg.Card width={620} height={380} tilt={-2} mode="dark"> ... </mg.Card>
+   - Automatically provides rounded corners, dark glass backdrop, crisp borders, and colored drop shadow.
 
-2. ATMOSPHERE, LIGHTING & DEPTH (MANDATORY 5-LAYER STACK IN EVERY SHOT):
-   Layer 1 — Background: Rich multi-stop gradient (e.g. \`linear-gradient(160deg, #070A12 0%, #0F172A 50%, #05070D 100%)\` for dark, or \`linear-gradient(160deg, #F4F6F9 0%, #E5EAF2 50%, #FAFBFD 100%)\` for light).
-   Layer 2 — Grid: \`<mg.GridBackground mode={themeMode} gridSize={48} />\` — subtle structural grid.
-   Layer 3 — Radial Spotlight: \`<div style={{ position: "absolute", inset: 0, background: "radial-gradient(60% 70% at 70% 30%, rgba(0,102,255,0.12), transparent 70%)" }} />\` — warm directional lighting.
-   Layer 4 — Content: All cards, charts, badges, SVGs, typography — the main visual payload.
-   Layer 5 — Noise Overlay: \`<mg.Noise opacity={0.035} />\` — film grain texture.
-   - Architectural Accents: 2-3 crosshair markers <mg.Marker x={120} y={120} variant="cross" color="#0066FF" /> at corner positions.
+3. KINETIC COUNTER (<mg.Roll>):
+   - <mg.Roll value={42} suffix="%" fontSize={80} color="#0066FF" frameAt={cueAt(15, 30)} />
 
-3. SEVEN MASTERCLASS COMPONENT RECIPES FROM THE DEMO REEL & CARTOGRAPHY SUITE:
-   A. Trajectory & Trend Chart (ChartStory Recipe):
-      - 1200x480px SVG chart (smaller than 1400 to stay in safe zone) centered horizontally at x:360, y:280.
-      - Dual-stroke curve: Glowing background stroke (strokeWidth={14} opacity={0.3} filter="url(#mgSoft)") + crisp inner line (strokeWidth={5} stroke="#0066FF").
-      - Area underfill with <linearGradient> and dynamic clipPath tracking path head.
-      - Pinned peak callout marker with pulsing sonar ring and floating stat card (borderRadius: 24px, glassmorphic, with <mg.Roll> and <mg.FocusFrame>).
-      - Camera starts at zoom: 1.2 centered on peak, tracks to wide zoom: 1.0.
-   B. Kinetic Hero with Ghost Numeral & Expanding Capsule (KineticHero Recipe):
-      - Giant ghost background number (fontSize: 850–1100, WebkitTextStroke: "2px rgba(0,102,255,0.10)", centered at x: 960).
-      - Foreground expanding capsule pill (borderRadius: 9999px) with spring physics, -2deg tilt, colored drop shadow, and <mg.Roll fontSize={90} color="#fff" /> inside.
-      - Bold kinetic typography (<mg.ImpactLine>) with word-synced rises.
-   C. Connected System Network Mesh (NetworkMesh Recipe):
-      - 5 to 7 node pills (borderRadius: 20px) in columns within x: 200–1700 range.
-      - Connected by curved bezier SVG paths (M ... C ...).
-      - Animated traveling glow packets (strokeDasharray="0.08 2" strokeDashoffset={-((frame * 0.02) % 1)} filter="url(#mgGlow)").
-      - Concentric sonar pulse rings expanding from hub nodes.
-   D. Dual Tilted Comparison Cards (SplitComparison Recipe):
-      - Two large floating cards (<mg.Card width={660} height={400} tilt={-2} mode="dark"> and <mg.Card width={660} height={400} tilt={2} mode="light">).
-      - Positioned symmetrically: left card at x: 100, right card at x: 1060 (safe zone compliant).
-      - Brand/product badges, metric rows, differential deltas (+45% / -60%), and <mg.FocusFrame color="#FF5A36" borderRadius={16}> popping on frame 18 with spring physics.
-   E. Bento Metric Dossier & Data Matrix:
-      - 3 to 4 structured large metric slabs (borderRadius: 24px, glassmorphic background) filling the frame within safe zone.
-      - Rolling counters (<mg.Roll fontSize={96}>), circular progress rings, status tags (borderRadius: 9999px pill), and crosshair markers.
-   F. Selective Iconic Entity Graphic:
-      - When an entity/symbol is discussed:
-      - Clean, iconic vector emblem/badge (5 to 15 clean SVG elements) inside a glassmorphic container (borderRadius: 28px, colored glow shadow), integrated with safe camera tracking (zoom ≤ 1.2).
-      - Strictly NO complex humanoid body drawings with fingers/knees (prevents distorted anatomy).
-   G. Geographic World Map & Tactical Route (MapStory Recipe):
-      - Broadcast-grade vector world map (<mg.MapStage theme="dark">).
-      - DO NOT attempt to draw raw geographic map SVG paths by hand. The engine provides pre-projected vector cartography with 100+ cities and countries ("London", "New York", "Washington", "San Francisco", "Tokyo", "Berlin", "Paris", "UK", "US", "China", etc.).
-      - Camera tracking along flight arc:
-        \`\`\`tsx
-        const routeP = spring({ frame: frame - 12, fps, config: { damping: 20, stiffness: 120 } });
-        return (
-          <AbsoluteFill style={{ background: "#060A12" }}>
-            <mg.Heading kicker="GLOBAL LOGISTICS" title="Transatlantic Passage" />
-            <mg.MapStage
-              theme="dark"
-              camera={{
-                trackRoute: { from: "London", to: "New York", progress: routeP },
-                startZoom: 2.2,
-                midZoom: 1.4,
-                endZoom: 2.0,
-              }}
-            >
-              <mg.MapHighlight country="GB" color="#FF5A36" active={frame >= 8} />
-              <mg.MapHighlight country="US" color="#0066FF" active={frame >= 50} />
-              <mg.MapCity name="London" label="LONDON, UK" frameAt={8} color="#FF5A36" />
-              <mg.MapCity name="New York" label="NEW YORK, US" frameAt={52} color="#0066FF" />
-              <mg.MapRoute from="London" to="New York" progress={routeP} color="#0066FF" showBeacon />
-            </mg.MapStage>
-            <mg.Noise opacity={0.035} />
-          </AbsoluteFill>
-        );
-        \`\`\`
-      - Or framing multiple regions: <mg.MapStage camera={{ fit: ["UK", "US"] }} theme="dark"> ... </mg.MapStage>
+4. EDITORIAL HEADING (<mg.Heading>):
+   - <mg.Heading kicker="PACIFIC DYNAMICS" title="Headline" frameAt={0} style={{ position: "absolute", left: 100, top: 70 }} />
 
-4. ANIMATION TIMING & VOICE LOCK:
-   - Snappy spring physics: spring({ frame: frame - delay, fps, config: { damping: 14, stiffness: 160, mass: 0.8 } }).
-   - Fast item staggers: 4–6 frames between elements.
-   - Word sync: Key reveals and camera shifts trigger precisely when narration speaks the word (frame >= cue.startFrame).
+5. KINETIC TYPOGRAPHY (<mg.ImpactLine>):
+   - <mg.ImpactLine text="CRITICAL THRESHOLD REACHED" frameAt={cueAt(10, 20)} size="hero" color="#F8FAFC" />
 
-5. REMOTION CODE CONTRACT:
-   - Imports:
-     import React from "react";
-     import { AbsoluteFill, Sequence, useCurrentFrame, useVideoConfig, interpolate, spring, Easing, random } from "remotion";
-     import { mg } from "@frame60/mg";
-   - Export:
-     export const GeneratedShot = (props) => { ... };
-   - Inside:
-     const frame = useCurrentFrame();
-     const { fps, width, height, durationInFrames } = useVideoConfig();
-     const cues = props.wordCues || [];
-   - Compact top-left documentary heading:
-     <mg.Heading kicker="DOCUMENTARY DOSSIER" title="Headline" frameAt={2} style={{ position: "absolute", left: 100, top: 70, maxWidth: 1100 }} />
-   - Center / Stage:
-     Use <mg.CameraRig zoom={zoom} x={panX} y={panY}> for camera moves (zoom NEVER above 1.3).
-   - Clean TSX only. No external URLs, no browser window/document globals, no Markdown backticks inside the sourceCode string.`;
+6. CAMERA STAGE (<mg.CameraRig>):
+   - <mg.CameraRig zoom={zoom} x={panX} y={panY}> ... </mg.CameraRig> (zoom strictly <= 1.3).`;
 
   const compactCues = formatCompactWordCues(args.wordCues);
 
-  const prompt = `${args.validationError ? `RETRY ${args.retryNumber ?? 1}. Fix this exact error:\n${args.validationError}\n\n` : ""}SHOT DIRECTION:
+  // Intelligent error diagnosis to guarantee instant fix on retry
+  let retryDiagnosis = "";
+  if (args.validationError) {
+    if (/Unexpected token|SyntaxError/i.test(args.validationError)) {
+      retryDiagnosis = `\n[CRITICAL COMPILER FIX REQUIRED - CODE TRUNCATION / SYNTAX ERROR]:
+Your previous attempt failed with: ${args.validationError}
+CAUSE: Your TSX code was cut off at the end of the file because it was too long (>220 lines).
+SOLUTION: Keep your TSX component strictly between 90 and 140 lines! Use <mg.*> primitives (e.g. mg.MapStage, mg.Card, mg.Roll, mg.Heading) to replace hundreds of lines of manual SVG paths, coordinate arrays, or nested divs. Ensure all JSX tags, parentheses, and braces are cleanly closed before the end of the file.`;
+    } else if (/WhileStatement|DoWhileStatement/i.test(args.validationError)) {
+      retryDiagnosis = `\n[CRITICAL COMPILER FIX REQUIRED - FORBIDDEN WHILE LOOP]:
+Your previous attempt failed with: ${args.validationError}
+CAUSE: You used a while loop, which AST validation strictly bans in Remotion to avoid infinite hangs.
+SOLUTION: Replace the while loop with a bounded "for (let i = 0; i < N; i++)" loop or "Array.from({ length: N }).map(...)".`;
+    } else if (/window|document|navigator|globalThis/i.test(args.validationError)) {
+      retryDiagnosis = `\n[CRITICAL COMPILER FIX REQUIRED - FORBIDDEN BROWSER GLOBAL]:
+Your previous attempt failed with: ${args.validationError}
+CAUSE: You referenced a browser/DOM global ("window" or "document"). Remotion components run in headless Node/worker environments.
+SOLUTION: Remove all references to window and document. Read screen width, height, fps from const { width, height, fps, durationInFrames } = useVideoConfig();`;
+    } else if (/mask/i.test(args.validationError)) {
+      retryDiagnosis = `\n[CRITICAL COMPILER FIX REQUIRED - FORBIDDEN CSS MASK]:
+Your previous attempt failed with: ${args.validationError}
+CAUSE: You used CSS mask/maskImage or SVG <mask id=...>. Remotion's web renderer throws fatal errors on CSS masks.
+SOLUTION: Remove mask/maskImage entirely. Use SVG <clipPath id="..."> with <rect rx={20}>, CSS overflow: "hidden", or opacity interpolation instead.`;
+    } else if (/not an approved primitive/i.test(args.validationError)) {
+      retryDiagnosis = `\n[CRITICAL COMPILER FIX REQUIRED - UNAPPROVED PRIMITIVE]:
+Your previous attempt failed with: ${args.validationError}
+CAUSE: You used a JSX tag that is not in the safe HTML whitelist.
+SOLUTION: Use standard approved HTML tags (div, span, p, h1-h6, strong, em, br, hr, canvas, ul, li) or <mg.*> primitives.`;
+    } else {
+      retryDiagnosis = `\n[CRITICAL COMPILER FIX REQUIRED]:
+Your previous attempt failed with: ${args.validationError}
+SOLUTION: Fix this exact issue in your TSX output now.`;
+    }
+  }
+
+  const prompt = `${args.validationError ? `RETRY ${args.retryNumber ?? 1}.${retryDiagnosis}\n\n` : ""}SHOT DIRECTION:
 - Shot ID: ${args.shot.shotId} | Duration: ${durationFrames} frames (${(durationFrames / 60).toFixed(1)}s)
 - Spoken Narration: "${args.shot.spokenText}"
 - Visual Theme: ${args.shot.themeMode || "dark"} | Family: ${args.shot.visualFamily || "editorial"}
@@ -1254,10 +1294,10 @@ ${compactCues}
 Palette: ${args.filmContinuity.palette || "slate, cyan, white"}
 Typography: ${args.filmContinuity.typography || "Inter, system-ui"}
 
-Return a fully authored Remotion TSX module in sourceCode. Deliver high-impact visual depth, multi-layered atmosphere, dynamic camera choreography, and masterclass motion graphics matching the demo reel.`;
+Return a fully authored Remotion TSX module in sourceCode. Target 90–150 lines of crisp, clean, broadcast-ready code. Deliver high-impact visual depth, rounded corners, colored glow shadows, and snappy motion graphics matching the demo reel.`;
 
   return structured<GeneratedCodeOutput>(GENERATED_CODE_SCHEMA, system, prompt, {
     temperature: 0.2,
-    maxTokens: 6000,
+    maxTokens: 16384,
   });
 }

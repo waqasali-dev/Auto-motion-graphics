@@ -87,7 +87,7 @@ export function getRoute2Default(): OpenAIEnv {
   const plannerModel = model;
   const reasoningEffort = "none";
   const maxOutputTokens =
-    Number(env.NEW_API_MAX_TOKENS || env.VITE_NEW_API_MAX_TOKENS || 0) || undefined;
+    Number(env.NEW_API_MAX_TOKENS || env.VITE_NEW_API_MAX_TOKENS || 0) || 32768;
 
   return { apiKey, baseURL, model, plannerModel, reasoningEffort, maxOutputTokens };
 }

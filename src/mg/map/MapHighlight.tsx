@@ -1,8 +1,8 @@
 import { spring, useCurrentFrame, useVideoConfig } from "remotion";
-import { WORLD_VECTOR_PATHS, COUNTRY_ISO_MAP } from "./geoData";
+import { resolveCountryPath } from "./geoData";
 
 export interface MapHighlightProps {
-  country: string; // ISO-2 code like "GB", "US", "CN" or region like "uk", "northAmerica"
+  country: string | string[]; // Country name, ISO code, or region ("Canada", "CA", "South America", ["ID", "AU"])
   color?: string;
   fillOpacity?: number;
   strokeWidth?: number;
@@ -11,7 +11,7 @@ export interface MapHighlightProps {
 }
 
 export function MapHighlight({
-  country,
+  country = "",
   color = "#0066FF",
   fillOpacity = 0.35,
   strokeWidth = 2.5,
@@ -21,11 +21,18 @@ export function MapHighlight({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  // Resolve country code to vector path
-  const normalizedKey = country.toUpperCase();
-  const mapping = COUNTRY_ISO_MAP[normalizedKey];
-  const pathKey = mapping ? mapping.pathKey : country;
-  const pathData = WORLD_VECTOR_PATHS[pathKey];
+  if (!country || !active) return null;
+
+  // Resolve country or array of countries to vector path strings
+  const targets = Array.isArray(country) ? country : [country];
+  const paths: string[] = [];
+
+  targets.forEach((target) => {
+    const path = resolveCountryPath(target);
+    if (path) paths.push(path);
+  });
+
+  if (paths.length === 0) return null;
 
   const activeFrame = Math.max(0, frame - frameAt);
   const p = active
@@ -36,28 +43,32 @@ export function MapHighlight({
       })
     : 0;
 
-  if (!pathData || !active || activeFrame <= 0) return null;
+  if (activeFrame <= 0) return null;
 
   return (
     <g className="map-highlight" style={{ pointerEvents: "none" }}>
-      {/* Country Glowing Area Fill */}
-      <path
-        d={pathData}
-        fill={color}
-        opacity={fillOpacity * p}
-        vectorEffect="non-scaling-stroke"
-      />
+      {paths.map((pathData, idx) => (
+        <g key={`hl-path-${idx}`}>
+          {/* Country Glowing Area Fill */}
+          <path
+            d={pathData}
+            fill={color}
+            opacity={fillOpacity * p}
+            vectorEffect="non-scaling-stroke"
+          />
 
-      {/* Country Glowing Border Accent */}
-      <path
-        d={pathData}
-        fill="none"
-        stroke={color}
-        strokeWidth={strokeWidth}
-        opacity={p}
-        filter="url(#mapGlow)"
-        vectorEffect="non-scaling-stroke"
-      />
+          {/* Country Glowing Border Accent */}
+          <path
+            d={pathData}
+            fill="none"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            opacity={p}
+            filter="url(#mapGlow)"
+            vectorEffect="non-scaling-stroke"
+          />
+        </g>
+      ))}
     </g>
   );
 }

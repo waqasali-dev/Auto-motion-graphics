@@ -12,7 +12,7 @@ export interface MapPinProps {
 }
 
 export function MapPin({
-  location,
+  location = [0, 0],
   label,
   sublabel,
   frameAt = 0,
@@ -22,7 +22,7 @@ export function MapPin({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const pt = useMemo(() => resolveLocation(location), [location]);
+  const pt = useMemo(() => resolveLocation(location || [0, 0]), [location]);
   const activeFrame = Math.max(0, frame - frameAt);
 
   // Entrance spring

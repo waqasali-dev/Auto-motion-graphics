@@ -1,4 +1,5 @@
 // High-performance vector geographic dataset and projection math for motion graphics.
+import { NATURAL_EARTH_LAND_PATH, NATURAL_EARTH_COUNTRY_PATHS } from "./naturalEarthData";
 
 export interface GeoPoint {
   x: number;
@@ -8,17 +9,13 @@ export interface GeoPoint {
 export const MAP_WIDTH = 2000;
 export const MAP_HEIGHT = 1000;
 
-// Equirectangular / Plate Carrée projection with standard bounds
+// Standard Equirectangular / Plate Carrée projection matching Natural Earth 110m
 export function projectGeo(lon: number, lat: number, width = MAP_WIDTH, height = MAP_HEIGHT): GeoPoint {
-  // Clamped bounds to avoid infinite distortion at extreme poles
-  const clampedLat = Math.max(-75, Math.min(80, lat));
+  const clampedLat = Math.max(-85, Math.min(85, lat));
   const clampedLon = Math.max(-180, Math.min(180, lon));
 
   const x = ((clampedLon + 180) / 360) * width;
-  // Latitude goes from +90 at top (y=0) to -90 at bottom (y=height)
-  // Scale non-linearly slightly near poles for balanced Miller-like aspect
-  const normalizedY = (80 - clampedLat) / 155;
-  const y = normalizedY * height;
+  const y = ((90 - clampedLat) / 180) * height;
 
   return { x, y };
 }
@@ -40,12 +37,17 @@ export const GEO_LOCATIONS: Record<string, [number, number]> = {
   "toronto": [-79.3832, 43.6532],
   "vancouver": [-123.1207, 49.2827],
   "mexico city": [-99.1332, 19.4326],
+  "lima": [-77.0428, -12.0464],
   "sao paulo": [-46.6333, -23.5505],
   "buenos aires": [-58.3816, -34.6037],
   "us": [-98.5795, 39.8283],
   "usa": [-98.5795, 39.8283],
   "united states": [-98.5795, 39.8283],
   "america": [-98.5795, 39.8283],
+  "southern us": [-90.0, 31.0],
+  "southern united states": [-90.0, 31.0],
+  "north america": [-98.0, 45.0],
+  "south america": [-60.0, -18.0],
   "canada": [-106.3468, 56.1304],
   "brazil": [-51.9253, -14.235],
 
@@ -119,6 +121,9 @@ export const GEO_LOCATIONS: Record<string, [number, number]> = {
   "delhi": [77.1025, 28.7041],
   "bangalore": [77.5946, 12.9716],
   "india": [78.9629, 20.5937],
+  "jakarta": [106.8456, -6.2088],
+  "indonesia": [113.9213, -0.7893],
+  "darwin": [130.8456, -12.4634],
   "sydney": [151.2093, -33.8688],
   "melbourne": [144.9631, -37.8136],
   "australia": [133.7751, -25.2744],
@@ -135,70 +140,69 @@ export function resolveLocation(target: string | [number, number]): GeoPoint {
       return projectGeo(lon, lat);
     }
   }
-  // Fallback to center
   return { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 };
 }
 
-// Region bounds presets: { center: [lon, lat], zoom: number }
+// Country & region alias mapping to SVG path keys
+export const COUNTRY_ALIASES: Record<string, string> = {
+  "canada": "Canada",
+  "ca": "CA",
+  "united states": "United States",
+  "usa": "USA",
+  "us": "US",
+  "america": "America",
+  "southern united states": "US",
+  "southern us": "US",
+  "north america": "North America",
+  "na": "NA",
+  "south america": "South America",
+  "sa": "SA",
+  "brazil": "BR",
+  "argentina": "AR",
+  "peru": "PE",
+  "chile": "CL",
+  "colombia": "CO",
+  "united kingdom": "UK",
+  "uk": "UK",
+  "britain": "Britain",
+  "england": "England",
+  "france": "France",
+  "germany": "Germany",
+  "europe": "Europe",
+  "eu": "EU",
+  "russia": "Russia",
+  "china": "China",
+  "japan": "Japan",
+  "india": "India",
+  "indonesia": "Indonesia",
+  "australia": "Australia",
+};
+
+export function resolveCountryPath(input: string): string | null {
+  if (!input) return null;
+  const key = String(input).trim();
+  const lower = key.toLowerCase();
+  const alias = COUNTRY_ALIASES[lower] || key.toUpperCase();
+  return NATURAL_EARTH_COUNTRY_PATHS[alias] || NATURAL_EARTH_COUNTRY_PATHS[key] || null;
+}
+
+// Region presets with exact cartographic centering & zoom
 export const REGION_PRESETS: Record<string, { center: [number, number]; zoom: number }> = {
-  world: { center: [10, 20], zoom: 1.0 },
-  transatlantic: { center: [-38, 46], zoom: 1.45 },
-  transpacific: { center: [-170, 32], zoom: 1.35 },
+  world: { center: [0, 20], zoom: 1.0 },
+  transatlantic: { center: [-35, 45], zoom: 1.6 },
+  transpacific: { center: [180, 15], zoom: 1.4 },
+  pacific: { center: [160, 0], zoom: 1.45 },
   northAmerica: { center: [-98, 42], zoom: 1.85 },
+  southAmerica: { center: [-60, -18], zoom: 2.0 },
   usa: { center: [-98, 39], zoom: 2.2 },
-  europe: { center: [12, 52], zoom: 2.4 },
-  uk: { center: [-2, 54], zoom: 3.2 },
+  canada: { center: [-106, 56], zoom: 2.2 },
+  europe: { center: [12, 52], zoom: 2.6 },
+  uk: { center: [-2, 54], zoom: 3.5 },
   asia: { center: [105, 30], zoom: 1.6 },
-  eastAsia: { center: [125, 35], zoom: 2.1 },
+  eastAsia: { center: [125, 35], zoom: 2.2 },
   middleEast: { center: [48, 27], zoom: 2.3 },
-  southAmerica: { center: [-60, -18], zoom: 1.6 },
 };
 
-// Simplified, clean continent & major country vector paths projected onto a 2000x1000 canvas.
-// These are crafted for sleek, stylized broadcast motion graphics (Vox / Johnny Harris style).
-export const WORLD_VECTOR_PATHS: Record<string, string> = {
-  // North America
-  northAmerica:
-    "M 360,110 C 420,100 500,120 540,160 C 580,200 590,260 560,310 C 530,340 480,360 450,420 C 430,460 420,520 400,540 C 370,550 350,510 330,460 C 310,410 260,380 240,330 C 220,280 230,220 270,170 C 300,130 330,120 360,110 Z",
-  // Greenland
-  greenland:
-    "M 740,70 C 780,60 820,80 840,120 C 850,150 830,190 790,210 C 760,220 730,190 710,160 C 700,130 710,90 740,70 Z",
-  // United Kingdom & Ireland (distinct path for precise highlighting)
-  uk:
-    "M 985,215 C 995,205 1010,210 1015,225 C 1020,240 1015,260 1005,275 C 995,285 985,280 980,265 C 975,250 978,225 985,215 Z M 965,240 C 972,235 978,245 975,255 C 972,265 965,265 962,258 C 960,250 962,242 965,240 Z",
-  // Continental Europe & Scandinavia
-  europe:
-    "M 1010,140 C 1050,130 1080,160 1100,210 C 1120,240 1160,250 1180,270 C 1170,300 1140,320 1110,320 C 1080,320 1050,350 1020,350 C 990,350 970,310 990,280 C 1000,260 1000,240 995,210 C 990,170 995,150 1010,140 Z",
-  // South America
-  southAmerica:
-    "M 550,560 C 600,550 660,580 700,640 C 730,690 740,770 710,830 C 680,880 630,940 590,950 C 560,940 540,880 540,820 C 530,760 500,700 500,650 C 500,600 520,570 550,560 Z",
-  // Africa
-  africa:
-    "M 980,380 C 1030,370 1090,390 1130,440 C 1170,490 1200,560 1180,630 C 1160,700 1140,770 1100,820 C 1060,860 1020,850 980,810 C 940,770 910,690 910,620 C 910,550 880,510 890,460 C 900,410 940,390 980,380 Z",
-  // Asia & Russia
-  asia:
-    "M 1200,120 C 1300,110 1450,130 1580,160 C 1680,190 1720,240 1700,310 C 1670,360 1620,400 1560,440 C 1500,480 1420,530 1350,530 C 1280,520 1240,460 1210,410 C 1180,360 1180,280 1190,220 C 1200,170 1180,140 1200,120 Z",
-  // Japan (island arc)
-  japan:
-    "M 1750,300 C 1765,310 1760,340 1745,360 C 1735,370 1725,360 1730,345 C 1735,330 1740,310 1750,300 Z",
-  // Australia & New Zealand
-  australia:
-    "M 1600,680 C 1660,660 1720,680 1750,730 C 1770,780 1760,840 1710,870 C 1660,890 1600,870 1560,830 C 1530,790 1540,730 1570,690 C 1580,680 1590,680 1600,680 Z",
-};
-
-// ISO-2 Country to Vector Key / Centroid mapping
-export const COUNTRY_ISO_MAP: Record<string, { pathKey: string; center: [number, number]; label: string }> = {
-  GB: { pathKey: "uk", center: [-1.17, 52.35], label: "United Kingdom" },
-  UK: { pathKey: "uk", center: [-1.17, 52.35], label: "United Kingdom" },
-  US: { pathKey: "northAmerica", center: [-98.57, 39.82], label: "United States" },
-  USA: { pathKey: "northAmerica", center: [-98.57, 39.82], label: "United States" },
-  CA: { pathKey: "northAmerica", center: [-106.34, 56.13], label: "Canada" },
-  FR: { pathKey: "europe", center: [2.21, 46.22], label: "France" },
-  DE: { pathKey: "europe", center: [10.45, 51.16], label: "Germany" },
-  CN: { pathKey: "asia", center: [104.19, 35.86], label: "China" },
-  JP: { pathKey: "japan", center: [138.25, 36.2], label: "Japan" },
-  RU: { pathKey: "asia", center: [105.31, 61.52], label: "Russia" },
-  BR: { pathKey: "southAmerica", center: [-51.92, -14.23], label: "Brazil" },
-  AU: { pathKey: "australia", center: [133.77, -25.27], label: "Australia" },
-};
-
+// Export authentic Natural Earth paths
+export const WORLD_LAND_PATH = NATURAL_EARTH_LAND_PATH;
+export const WORLD_COUNTRY_PATHS = NATURAL_EARTH_COUNTRY_PATHS;

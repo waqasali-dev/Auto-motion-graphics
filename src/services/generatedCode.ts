@@ -40,12 +40,15 @@ const REMOTION_IMPORTS = new Set([
 const SAFE_HTML = new Set([
   // Layout & structural
   "div", "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "header", "footer", "section", "article", "main", "aside", "figure", "figcaption",
+  "br", "hr",
   // Text formatting
-  "strong", "em", "b", "i", "small", "code", "pre", "blockquote", "mark", "sub", "sup",
+  "strong", "em", "b", "i", "small", "code", "pre", "blockquote", "mark", "sub", "sup", "label", "abbr", "cite", "time", "kbd", "button",
   // Lists
   "ul", "ol", "li",
   // Tables
   "table", "thead", "tbody", "tr", "th", "td",
+  // Styling & canvas
+  "style", "canvas",
   // SVG core & shapes
   "svg", "g", "path", "rect", "circle", "ellipse", "line", "polyline", "polygon",
   // SVG structural & definitions (including metadata, marker, pattern)
@@ -224,6 +227,13 @@ function inspectAst(root: any) {
     if (node.type === "ObjectProperty" && node.key?.type === "Identifier" && ["animation", "transition"].includes(node.key.name)) {
       throw new Error("CSS keyframe animations/transitions are forbidden. Drive motion from Remotion frames.");
     }
+    if (
+      node.type === "ObjectProperty" &&
+      node.key?.type === "Identifier" &&
+      ["mask", "maskImage", "WebkitMaskImage", "webkitMaskImage"].includes(node.key.name)
+    ) {
+      throw new Error("CSS mask/maskImage is not supported by the Remotion renderer. Use SVG <clipPath id=\"...\">, CSS overflow: 'hidden', or opacity interpolation instead.");
+    }
     // Allow standard W3C SVG namespace URLs like http://www.w3.org/2000/svg
     if (
       node.type === "StringLiteral" &&
@@ -306,8 +316,9 @@ export function createFallbackShotSource(
   shot: { shotId: string; spokenText?: string; cleanedDisplaySentences?: string[]; visualPrompt?: { visualMetaphor?: string; premise?: string } },
   _continuity?: { palette?: string; typography?: string }
 ): string {
-  const headline = (shot.cleanedDisplaySentences?.[0] || shot.spokenText || "Visual Sequence").replace(/["\\]/g, "");
-  const metaphor = (shot.visualPrompt?.visualMetaphor || shot.visualPrompt?.premise || "Voice-aligned motion sequence").replace(/["\\]/g, "");
+  const headline = (shot.cleanedDisplaySentences?.[0] || shot.spokenText || "Motion Visual").replace(/["\\]/g, "");
+  const kicker = (shot.shotId || "EXPLAINER DOSSIER").toUpperCase();
+
   return `import React from "react";
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, spring, Easing } from "remotion";
 import { mg } from "@frame60/mg";
@@ -317,33 +328,83 @@ export const GeneratedShot = (props) => {
   const { fps, width, height, durationInFrames } = useVideoConfig();
   const cues = props.wordCues || [];
   
-  const bgOpacity = interpolate(frame, [0, 14], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const contentP = spring({ frame: frame - 4, fps, config: { stiffness: 90, damping: 18 } });
-  const cameraZoom = interpolate(frame, [0, Math.max(1, durationInFrames)], [1, 1.03], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const enterP = spring({ frame: frame - 4, fps, config: { damping: 14, stiffness: 160 } });
+  const chartP = interpolate(frame, [10, Math.min(80, durationInFrames - 10)], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const camZoom = interpolate(frame, [0, durationInFrames], [1.08, 1.0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  
+  // Parabolic trajectory coordinates across a 1200x380 area
+  const curveD = "M 240,580 Q 720,380 1200,480 T 1680,360";
+  const beaconX = 240 + (1680 - 240) * chartP;
+  const beaconY = 580 - Math.sin(chartP * Math.PI) * 140;
 
   return (
-    <AbsoluteFill style={{ backgroundColor: "#070A12", color: "#F4F6F9", padding: "100px 120px", display: "flex", flexDirection: "column", justifyContent: "center", opacity: bgOpacity, overflow: "hidden" }}>
-      <mg.CameraRig zoom={cameraZoom} x={0} y={0}>
-        <div style={{ position: "relative", zIndex: 10, maxWidth: 1400 }}>
-          <div style={{ fontFamily: "monospace", fontSize: 18, color: "#0066FF", letterSpacing: "0.25em", textTransform: "uppercase", marginBottom: 28, opacity: interpolate(frame, [0, 10], [0, 0.9], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
-            ${shot.shotId} · VOICE SEQUENCE
+    <AbsoluteFill style={{ background: "linear-gradient(160deg, #070A12 0%, #0F172A 50%, #05070D 100%)", color: "#F8FAFC", overflow: "hidden" }}>
+      {/* Layer 2: Grid */}
+      <mg.GridBackground mode="dark" gridSize={48} />
+      
+      {/* Layer 3: Radial directional lighting */}
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(60% 70% at 75% 25%, rgba(0,102,255,0.18), transparent 70%)" }} />
+
+      {/* Top-Left Documentary Heading */}
+      <mg.Heading kicker="${kicker}" title="${headline}" frameAt={2} style={{ position: "absolute", left: 100, top: 70, maxWidth: 1100 }} />
+
+      {/* Layer 4: Spatial Hero Motion Graphics Stage */}
+      <mg.CameraRig zoom={camZoom} x={0} y={0}>
+        <div style={{ position: "absolute", inset: 0, opacity: enterP }}>
+          {/* Animated SVG Trajectory Curve */}
+          <svg width={1920} height={1080} style={{ position: "absolute", inset: 0, overflow: "visible" }}>
+            <defs>
+              <linearGradient id="fallbackArea" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#0066FF" stopOpacity="0.25" />
+                <stop offset="100%" stopColor="#0066FF" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            {/* Glowing broad stroke */}
+            <path d={curveD} fill="none" stroke="#0066FF" strokeWidth={14} opacity={0.3} filter="url(#mgSoft)" pathLength={1} strokeDasharray="1" strokeDashoffset={1 - chartP} strokeLinecap="round" />
+            {/* Sharp inner stroke */}
+            <path d={curveD} fill="none" stroke="#38BDF8" strokeWidth={4.5} strokeLinecap="round" pathLength={1} strokeDasharray="1" strokeDashoffset={1 - chartP} />
+            {/* Beacon dot */}
+            {chartP > 0.05 && (
+              <g transform={\`translate(\${beaconX}, \${beaconY})\`}>
+                <circle r={18} fill="#0066FF" opacity={0.35} />
+                <circle r={7} fill="#FFFFFF" stroke="#0066FF" strokeWidth={2.5} />
+              </g>
+            )}
+          </svg>
+
+          {/* Floating Glassmorphic Metric Slabs */}
+          <div style={{ position: "absolute", left: 240, top: 620, width: 440, height: 180, borderRadius: 24, background: "rgba(15,23,42,0.85)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.12)", padding: 24, boxShadow: "0 20px 60px rgba(0,102,255,0.25)" }}>
+            <div style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: "0.2em", color: "#38BDF8", fontWeight: 700, marginBottom: 8 }}>KEY METRIC TRAJECTORY</div>
+            <div style={{ fontSize: 56, fontWeight: 800, color: "#FFFFFF" }}>
+              +<mg.Roll from={0} to={85} fontSize={56} color="#FFFFFF" />%
+            </div>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>System variance relative to normal</div>
           </div>
-          <h1 style={{ fontSize: 68, fontWeight: 700, lineHeight: 1.1, letterSpacing: "-0.03em", marginBottom: 32, transform: \`translateY(\${(1 - contentP) * 30}px)\`, opacity: contentP }}>
-            ${headline}
-          </h1>
-          <div style={{ fontSize: 22, lineHeight: 1.5, color: "rgba(244,246,249,0.72)", maxWidth: 1100, marginBottom: 44 }}>
-            ${metaphor}
+
+          <div style={{ position: "absolute", left: 720, top: 620, width: 440, height: 180, borderRadius: 24, background: "rgba(15,23,42,0.85)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.12)", padding: 24, boxShadow: "0 20px 60px rgba(255,90,54,0.20)" }}>
+            <div style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: "0.2em", color: "#FF5A36", fontWeight: 700, marginBottom: 8 }}>THERMAL ANOMALY</div>
+            <div style={{ fontSize: 56, fontWeight: 800, color: "#FF5A36" }}>
+              +<mg.Roll from={0} to={2} fontSize={56} color="#FF5A36" />.5°C
+            </div>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>Eastern basin water warming</div>
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 14px", fontSize: 26, fontWeight: 600 }}>
-            {cues.map((c, i) => (
-              <mg.WordCue key={i} cue={c} emphasis={i % 5 === 0} emphasisColor="#0066FF">
-                {c.text}
-              </mg.WordCue>
-            ))}
+
+          <div style={{ position: "absolute", left: 1200, top: 620, width: 480, height: 180, borderRadius: 24, background: "rgba(15,23,42,0.85)", backdropFilter: "blur(14px)", border: "1px solid rgba(255,255,255,0.12)", padding: 24, boxShadow: "0 20px 60px rgba(16,185,129,0.20)" }}>
+            <mg.FocusFrame color="#10B981" borderRadius={24} style={{ position: "absolute", inset: 0 }} />
+            <div style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: "0.2em", color: "#10B981", fontWeight: 700, marginBottom: 8 }}>ATMOSPHERIC STATE</div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: "#FFFFFF", marginTop: 8 }}>CIRCULATION SHIFT</div>
+            <div style={{ fontSize: 14, color: "rgba(255,255,255,0.6)", marginTop: 6 }}>Disrupted trade wind equilibrium</div>
           </div>
         </div>
-        <mg.Noise opacity={0.035} />
+
+        {/* Corner Crosshairs */}
+        <mg.Marker x={120} y={120} variant="cross" color="#0066FF" />
+        <mg.Marker x={1800} y={120} variant="cross" color="#FF5A36" />
+        <mg.Marker x={1800} y={960} variant="cross" color="#0066FF" />
       </mg.CameraRig>
+
+      {/* Layer 5: Film grain noise */}
+      <mg.Noise opacity={0.035} />
     </AbsoluteFill>
   );
 };`;

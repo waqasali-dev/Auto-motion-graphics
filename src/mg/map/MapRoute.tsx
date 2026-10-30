@@ -25,8 +25,8 @@ export function MapRoute({
   beaconSize = 8,
 }: MapRouteProps) {
   const p = Math.max(0, Math.min(1, progress));
-  const fromPt = useMemo(() => resolveLocation(from), [from]);
-  const toPt = useMemo(() => resolveLocation(to), [to]);
+  const fromPt = useMemo(() => resolveLocation(from || [-74, 40]), [from]);
+  const toPt = useMemo(() => resolveLocation(to || [0, 51]), [to]);
 
   // Calculate distance and parabolic control point
   const dx = toPt.x - fromPt.x;

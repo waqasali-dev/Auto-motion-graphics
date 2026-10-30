@@ -3,7 +3,7 @@ import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from "remo
 import {
   MAP_WIDTH,
   MAP_HEIGHT,
-  WORLD_VECTOR_PATHS,
+  WORLD_LAND_PATH,
   REGION_PRESETS,
   resolveLocation,
   type GeoPoint,
@@ -27,6 +27,13 @@ export function useMap() {
   return useContext(MapContext);
 }
 
+export interface CameraSequenceStop {
+  atFrame: number;
+  focus?: string | [number, number] | (string | [number, number])[];
+  zoom?: number;
+  transitionFrames?: number; // Duration of glide to this stop (defaults to 24)
+}
+
 export interface MapCameraOptions {
   center?: string | [number, number];
   zoom?: number;
@@ -39,6 +46,7 @@ export interface MapCameraOptions {
   startZoom?: number;
   midZoom?: number;
   endZoom?: number;
+  sequence?: CameraSequenceStop[];
 }
 
 export interface MapStageProps {
@@ -49,7 +57,35 @@ export interface MapStageProps {
   zoom?: number;
   theme?: "dark" | "light";
   showGraticule?: boolean;
+  dimInactive?: boolean;
   style?: CSSProperties;
+}
+
+function resolveFocusPointAndZoom(
+  focusTarget: string | [number, number] | (string | [number, number])[] | undefined,
+  fallbackZoom = 2.2
+): { x: number; y: number; zoom: number } {
+  if (!focusTarget || focusTarget === "world") {
+    return { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2, zoom: 1.0 };
+  }
+
+  // Multi-point / region bounding box fit
+  if (Array.isArray(focusTarget) && (focusTarget.length > 2 || typeof focusTarget[0] === "string" || Array.isArray(focusTarget[0]))) {
+    const list = focusTarget as (string | [number, number])[];
+    const pts = list.map(resolveLocation);
+    const minX = Math.min(...pts.map((p) => p.x));
+    const maxX = Math.max(...pts.map((p) => p.x));
+    const minY = Math.min(...pts.map((p) => p.y));
+    const maxY = Math.max(...pts.map((p) => p.y));
+    const spanX = Math.max(180, maxX - minX);
+    const spanY = Math.max(140, maxY - minY);
+    const fitZoom = Math.max(1.1, Math.min(2.8, Math.min((MAP_WIDTH * 0.72) / spanX, (MAP_HEIGHT * 0.72) / spanY)));
+    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, zoom: fitZoom };
+  }
+
+  // Single location
+  const pt = resolveLocation(focusTarget as string | [number, number]);
+  return { x: pt.x, y: pt.y, zoom: fallbackZoom };
 }
 
 export function MapStage({
@@ -60,6 +96,7 @@ export function MapStage({
   zoom,
   theme = "dark",
   showGraticule = true,
+  dimInactive = false,
   style,
 }: MapStageProps) {
   const frame = useCurrentFrame();
@@ -84,19 +121,61 @@ export function MapStage({
       targetY = pt.y;
     }
 
-    // Dynamic Route Tracking Camera
-    if (camera?.trackRoute) {
+    // 1. Dynamic Camera Sequence (Multi-Stop Narrative Choreography)
+    if (camera?.sequence && camera.sequence.length > 0) {
+      const seq = [...camera.sequence].sort((a, b) => a.atFrame - b.atFrame);
+
+      // Find the active segment
+      let curIdx = 0;
+      for (let i = 0; i < seq.length; i++) {
+        if (frame >= seq[i].atFrame) {
+          curIdx = i;
+        } else {
+          break;
+        }
+      }
+
+      const curStop = seq[curIdx];
+      const curResolved = resolveFocusPointAndZoom(curStop.focus, curStop.zoom ?? 2.2);
+
+      if (curIdx < seq.length - 1) {
+        const nextStop = seq[curIdx + 1];
+        const transitionDuration = nextStop.transitionFrames ?? 24;
+        const transitionStart = nextStop.atFrame;
+
+        if (frame >= transitionStart) {
+          // Transitioning to nextStop
+          const nextResolved = resolveFocusPointAndZoom(nextStop.focus, nextStop.zoom ?? 2.2);
+          const t = Math.min(1, Math.max(0, (frame - transitionStart) / transitionDuration));
+          // Cubic smoothstep easing
+          const easeT = t * t * (3 - 2 * t);
+
+          targetX = curResolved.x + (nextResolved.x - curResolved.x) * easeT;
+          targetY = curResolved.y + (nextResolved.y - curResolved.y) * easeT;
+          targetZoom = curResolved.zoom + (nextResolved.zoom - curResolved.zoom) * easeT;
+        } else {
+          // Stable at curStop
+          targetX = curResolved.x;
+          targetY = curResolved.y;
+          targetZoom = curResolved.zoom;
+        }
+      } else {
+        // Last stop
+        targetX = curResolved.x;
+        targetY = curResolved.y;
+        targetZoom = curResolved.zoom;
+      }
+    }
+    // 2. Dynamic Route Tracking Camera
+    else if (camera?.trackRoute) {
       const fromPt = resolveLocation(camera.trackRoute.from);
       const toPt = resolveLocation(camera.trackRoute.to);
       const p = Math.max(0, Math.min(1, camera.trackRoute.progress));
 
-      // Interpolate center position following the route
       targetX = fromPt.x + (toPt.x - fromPt.x) * p;
-      // Slight parabolic arc in Y for flight curvature
       const arcDip = Math.sin(p * Math.PI) * 40;
       targetY = fromPt.y + (toPt.y - fromPt.y) * p - arcDip;
 
-      // Parabolic zoom: tight at start -> wider in mid-flight -> tight at arrival
       const startZ = camera.startZoom ?? 2.2;
       const midZ = camera.midZoom ?? 1.4;
       const endZ = camera.endZoom ?? 2.0;
@@ -106,23 +185,13 @@ export function MapStage({
       } else {
         targetZoom = interpolate(p, [0.5, 1], [midZ, endZ]);
       }
-    } else if (camera?.fit && camera.fit.length >= 2) {
-      // Fit multiple points in bounding box
-      const pts = camera.fit.map(resolveLocation);
-      const minX = Math.min(...pts.map((p) => p.x));
-      const maxX = Math.max(...pts.map((p) => p.x));
-      const minY = Math.min(...pts.map((p) => p.y));
-      const maxY = Math.max(...pts.map((p) => p.y));
-
-      targetX = (minX + maxX) / 2;
-      targetY = (minY + maxY) / 2;
-
-      const spanX = Math.max(200, maxX - minX);
-      const spanY = Math.max(150, maxY - minY);
-      // Fit within ~70% of viewport
-      const fitZoomX = (MAP_WIDTH * 0.7) / spanX;
-      const fitZoomY = (MAP_HEIGHT * 0.7) / spanY;
-      targetZoom = Math.max(1.0, Math.min(2.8, Math.min(fitZoomX, fitZoomY)));
+    }
+    // 3. Static Bounding Box Fit
+    else if (camera?.fit && camera.fit.length >= 2) {
+      const resolved = resolveFocusPointAndZoom(camera.fit);
+      targetX = resolved.x;
+      targetY = resolved.y;
+      targetZoom = resolved.zoom;
     } else if (camera?.center) {
       const pt = resolveLocation(camera.center);
       targetX = pt.x;
@@ -133,7 +202,7 @@ export function MapStage({
     // Clamp camera zoom to safe limits
     const safeZoom = Math.max(0.9, Math.min(3.5, targetZoom));
     return { camX: targetX, camY: targetY, camZoom: safeZoom };
-  }, [camera, center, zoom, preset]);
+  }, [camera, center, zoom, preset, frame]);
 
   // Compute dynamic SVG viewBox based on camera center and zoom
   const viewBoxWidth = MAP_WIDTH / camZoom;
@@ -223,21 +292,15 @@ export function MapStage({
             </g>
           )}
 
-          {/* Base world landmass polygons */}
-          <g id="world-landmasses">
-            {Object.entries(WORLD_VECTOR_PATHS).map(([key, d]) => (
-              <path
-                key={key}
-                d={d}
-                fill={landFill}
-                stroke={landStroke}
-                strokeWidth={1.5}
-                vectorEffect="non-scaling-stroke"
-                style={{
-                  transition: "fill 0.3s ease",
-                }}
-              />
-            ))}
+          {/* Base authentic world landmass polygons (Natural Earth 110m) */}
+          <g id="world-landmasses" opacity={dimInactive ? 0.22 : 1}>
+            <path
+              d={WORLD_LAND_PATH}
+              fill={landFill}
+              stroke={landStroke}
+              strokeWidth={1.2}
+              vectorEffect="non-scaling-stroke"
+            />
           </g>
 
           {/* Child layer: Highlights, Routes, Pins, Beacons */}
