@@ -17,7 +17,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { mg } from "../mg/runtime";
-import type { ShotVisualPrompt, WordCue, CreativeShotPlan } from "../sdk/contract.generated";
+import type { ShotVisualPrompt, WordCue, CreativeShotPlan, UploadedImageAsset } from "../sdk/contract.generated";
 
 export interface GeneratedSceneProps {
   shotPlan: CreativeShotPlan;
@@ -29,7 +29,7 @@ export interface GeneratedSceneProps {
     paletteAnchor: string;
     typeAnchor: string;
   };
-  assets: string[];
+  assets: Record<string, UploadedImageAsset>;
 }
 
 export type GeneratedSceneComponent = React.ComponentType<GeneratedSceneProps>;

@@ -8,10 +8,10 @@ import type { PipelineLog, Project } from "../services/projects";
 import type { GeneratedFilm } from "../sdk/contract.generated";
 import { Check, ChevronRight, CircleDashed, LoaderCircle, TriangleAlert, Play, RotateCcw } from "lucide-react";
 
-export type StageKey = "1_preprocessor" | "2_planner" | "3_art-direction" | "4_codegen" | "5_validator";
+export type StageKey = "1_preprocessor" | "1.5_entity-assets" | "2_planner" | "3_art-direction" | "4_codegen" | "5_validator";
 
 export interface StageProgress {
-  stage: "planning" | "art-direction" | "coding" | "validation";
+  stage: "entity-assets" | "planning" | "art-direction" | "coding" | "validation";
   completed: number;
   total: number;
   message: string;
@@ -19,6 +19,7 @@ export interface StageProgress {
 
 const STAGES: Array<{ key: StageKey; title: string; blurb: string; maps?: StageProgress["stage"] }> = [
   { key: "1_preprocessor", title: "Read transcript & lock word timing", blurb: "Every word gets an exact frame from your audio." },
+  { key: "1.5_entity-assets", title: "Analyze entities & ingest image assets", blurb: "Detect figures/products requiring imagery; optional uploads & clever fallbacks.", maps: "entity-assets" },
   { key: "2_planner", title: "Plan what each spoken beat shows", blurb: "A creative director storyboards the film.", maps: "planning" },
   { key: "3_art-direction", title: "Write the visual prompt per shot", blurb: "Precise composition, camera and word choreography.", maps: "art-direction" },
   { key: "4_codegen", title: "Generate Remotion code", blurb: "A worker writes original TSX for each shot.", maps: "coding" },
@@ -53,7 +54,7 @@ export function PipelineProgress({
   draftFilm?: GeneratedFilm | null;
   project?: Project | null;
   onContinue?: () => void;
-  onStartFromStage?: (stage: "audio-align" | "planning" | "art-direction" | "coding" | "validation") => void;
+  onStartFromStage?: (stage: "audio-align" | "entity-assets" | "planning" | "art-direction" | "coding" | "validation") => void;
 }) {
   const [expanded, setExpanded] = useState<Set<StageKey>>(new Set());
   const [now, setNow] = useState(() => Date.now());
@@ -78,6 +79,7 @@ export function PipelineProgress({
       const key = STAGES.find((s) => s.key === log.stage)?.key;
       if (key) map.get(key)!.push(log);
       else if (log.stage === "1_audio-align") map.get("1_preprocessor")!.push(log);
+      else if (log.stage === "1.5_entity-assets") map.get("1.5_entity-assets")!.push(log);
       else if (log.stage === "error") {
         let targetKey: StageKey = "5_validator";
         for (const stage of STAGES) {
@@ -103,6 +105,12 @@ export function PipelineProgress({
     if (key === "1_preprocessor") {
       if (hasWords && (totalShots > 0 || project?.rawTranscript?.words?.length)) return "done";
       return running ? "active" : "pending";
+    }
+
+    if (key === "1.5_entity-assets") {
+      if ((targetFilm?.entityRequirements && targetFilm.entityRequirements.length > 0) || (project?.entityRequirements && project.entityRequirements.length > 0)) return "done";
+      if (statusOf("1_preprocessor") === "done") return running ? "active" : "pending";
+      return "pending";
     }
 
     if (key === "2_planner") {
@@ -304,6 +312,19 @@ export function PipelineProgress({
                         >
                           <RotateCcw className="w-2.5 h-2.5" />
                           Restart word timing
+                        </button>
+                      )}
+
+                      {/* Stage 1.5: Analyze entities & ingest image assets */}
+                      {stage.key === "1.5_entity-assets" && onStartFromStage && (
+                        <button
+                          type="button"
+                          onClick={() => onStartFromStage("entity-assets")}
+                          className="px-2.5 py-1 rounded bg-[color:var(--color-surface-2)] hover:bg-[color:var(--color-surface-3)] border border-[color:var(--color-border)] text-[10px] font-medium text-[color:var(--color-text-soft)] hover:text-[color:var(--color-text)] flex items-center gap-1.5 transition-colors cursor-pointer"
+                          title="Re-analyze transcript entities and manage image assets"
+                        >
+                          <RotateCcw className="w-2.5 h-2.5" />
+                          Re-analyze entity assets
                         </button>
                       )}
 

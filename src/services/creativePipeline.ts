@@ -13,9 +13,11 @@ import type {
   GeneratedSceneShot,
   ShotVisualPrompt,
   WordCue,
+  EntityImageRequirement,
+  UploadedImageAsset,
 } from "../sdk/contract.generated";
 import { preprocessTranscript } from "./pipeline";
-import { generateRemotionShotCode, generateShotVisualPrompt, planCreativeFilm } from "./openai";
+import { generateRemotionShotCode, generateShotVisualPrompt, planCreativeFilm, analyzeTranscriptEntities } from "./openai";
 import { getEnv, getCodeConcurrency } from "./env";
 import type { GeneratedSceneProps } from "./generatedCode";
 import { actForPosition } from "../variety/taxonomy";
@@ -37,10 +39,12 @@ export interface CreativePipelineInput {
   alignmentConfidence: number;
   audioUrl?: string;
   resumeFilm?: GeneratedFilm | null;
-  startFromStage?: "audio-align" | "planning" | "art-direction" | "coding" | "validation";
+  startFromStage?: "audio-align" | "entity-assets" | "planning" | "art-direction" | "coding" | "validation";
+  entityRequirements?: EntityImageRequirement[];
+  availableAssets?: UploadedImageAsset[];
   onLog?: (entry: PipelineLog) => void;
-  onStage?: (stage: "planning" | "art-direction" | "coding" | "validation", progress: number, total: number, message: string) => void;
-  onSaveSnapshot?: (draftFilm: GeneratedFilm, stage: "planning" | "art-direction" | "coding" | "validation") => void;
+  onStage?: (stage: "entity-assets" | "planning" | "art-direction" | "coding" | "validation", progress: number, total: number, message: string) => void;
+  onSaveSnapshot?: (draftFilm: GeneratedFilm, stage: "entity-assets" | "planning" | "art-direction" | "coding" | "validation") => void;
 }
 
 export async function mapLimit<T, R>(
@@ -369,6 +373,43 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
     ].filter(Boolean).join("\n"),
   );
 
+  // ─── STAGE 1.5: Entity Visual Asset Analysis & Ingestion ───
+  let entityRequirements = input.entityRequirements || input.resumeFilm?.entityRequirements || [];
+  const availableAssets = input.availableAssets || input.resumeFilm?.assets || [];
+
+  const shouldRunEntityAnalysis =
+    !entityRequirements.length &&
+    input.startFromStage !== "art-direction" &&
+    input.startFromStage !== "coding" &&
+    input.startFromStage !== "validation";
+
+  if (shouldRunEntityAnalysis) {
+    log("1.5_entity-assets", "Analyzing transcript to detect key entities (figures, products, landmarks) requiring visual imagery...", "running");
+    input.onStage?.("entity-assets", 0, 1, "Detecting visual entities in transcript");
+    try {
+      entityRequirements = await analyzeTranscriptEntities({
+        transcript: input.sourceTranscript || input.rawTranscript.sentences.map((s) => s.text).join(" "),
+        sentences: input.rawTranscript.sentences,
+        creativeBrief: input.creativeBrief,
+        onProgress: (msg) => log("1.5_entity-assets", msg, "running"),
+      });
+      input.onStage?.("entity-assets", 1, 1, `${entityRequirements.length} entities identified`);
+      log(
+        "1.5_entity-assets",
+        entityRequirements.length > 0
+          ? `Detected ${entityRequirements.length} entities that would elevate video presentation with images: ${entityRequirements.map((e) => e.name).join(", ")}.`
+          : "No specific real-world figures or products requiring images detected. Relying on bespoke motion graphics.",
+        "success",
+        entityRequirements.map((e) => `• ${e.name} (${e.category}) -> Slug: ${e.targetFilename} | Importance: ${e.importance}\n  Rationale: ${e.rationale}\n  Fallback: ${e.cleverFallbackIdea}`).join("\n\n")
+      );
+    } catch (err) {
+      log("1.5_entity-assets", `Entity analysis skipped (${(err as Error).message.slice(0, 100)}). Proceeding with pure motion graphics.`, "running");
+      entityRequirements = [];
+    }
+  } else if (entityRequirements.length > 0) {
+    log("1.5_entity-assets", `Using ${entityRequirements.length} previously detected entities (${availableAssets.length} uploaded images ready).`, "success");
+  }
+
   // Plan in windows so a 30-second script and an 8-minute script both work.
   // Shot count is never fixed: each window returns as many beats as its content needs.
   const sentences = input.rawTranscript.sentences;
@@ -472,6 +513,8 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
         referenceStyle: REF_STYLE,
         creativeBrief: input.creativeBrief,
         window: planWindow,
+        availableAssets,
+        entityRequirements,
       };
 
       // Reuse cached shots if resuming a draft that already planned this window
@@ -686,6 +729,8 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
     alignmentConfidence: input.alignmentConfidence,
     wordCues: allWords,
     shots: draftShots,
+    assets: availableAssets,
+    entityRequirements,
     visualContinuity: {
       palette: plan.palette,
       typography: plan.typography,
@@ -730,6 +775,8 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
         continuityRules: plan.continuityRules,
         previousSummary: summaries[index - 1] ?? "Opening shot: establish the visual world.",
         nextSummary: summaries[index + 1] ?? "Final shot: resolve the film's visual motif.",
+        availableAssets,
+        entityRequirements,
       });
     } catch (promptErr) {
       log("3_art-direction", `${shot.shotId}: visual prompt warning (${(promptErr as Error).message.slice(0, 100)}). Using synthesized prompt.`, "running");
@@ -842,6 +889,7 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
           filmContinuity: { palette: plan.palette, typography: plan.typography, texture: plan.texture, rules: plan.continuityRules },
           previousSummary: summaries[index - 1] ?? "opening shot",
           nextSummary: summaries[index + 1] ?? "final shot",
+          availableAssets,
           validationError: failure || undefined,
           retryNumber: retry || undefined,
         });
@@ -849,6 +897,11 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
         // Syntax, imports and allowed primitives are checked before any code executes.
         const { compileGeneratedShot } = await import("./generatedCode");
         compileGeneratedShot(result.sourceCode);
+        const assetsRecord: Record<string, UploadedImageAsset> = {};
+        for (const a of availableAssets) {
+          assetsRecord[a.standardizedFilename] = a;
+          assetsRecord[a.id] = a;
+        }
         const componentProps: GeneratedSceneProps = {
           shotPlan: shot,
           visualPrompt,
@@ -859,7 +912,7 @@ export async function runCreativePipeline(input: CreativePipelineInput): Promise
             paletteAnchor: plan.palette,
             typeAnchor: plan.typography,
           },
-          assets: [],
+          assets: assetsRecord,
         };
         await smokeShot(result.sourceCode, componentProps, shot.durationFrames, shot.shotId);
         codeDone++;
@@ -976,17 +1029,23 @@ export async function regenerateGeneratedShot(
         filmContinuity: film.visualContinuity,
         previousSummary: film.shots[index - 1]?.visualSummary ?? "opening shot",
         nextSummary: film.shots[index + 1]?.visualSummary ?? "final shot",
+        availableAssets: film.assets,
         validationError: failure || undefined,
         retryNumber: retry || undefined,
       });
       const { compileGeneratedShot } = await import("./generatedCode");
       const compiled = compileGeneratedShot(result.sourceCode);
+      const assetsRecord: Record<string, UploadedImageAsset> = {};
+      for (const a of film.assets || []) {
+        assetsRecord[a.standardizedFilename] = a;
+        assetsRecord[a.id] = a;
+      }
       const props: GeneratedSceneProps = {
         shotPlan: shot,
         visualPrompt: shot.visualPrompt!,
         wordCues: shot.wordCues,
         continuity: shot.continuity,
-        assets: [],
+        assets: assetsRecord,
       };
       await smokeShot(result.sourceCode, props, shot.durationFrames, shot.shotId);
       return {
