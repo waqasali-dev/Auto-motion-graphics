@@ -4,7 +4,7 @@
 
 import type { Beat, PlannedShot, VarietyReport } from "../sdk/contract";
 import type { FrameLockedShot, ValidationResult, RawTranscriptJSON } from "../sdk/contract.pipeline";
-import type { GeneratedFilm } from "../sdk/contract.generated";
+import type { GeneratedFilm, EntityImageRequirement, UploadedImageAsset } from "../sdk/contract.generated";
 
 export type ProjectStatus = "draft" | "processing" | "ready" | "error";
 export type PipelineStage = "1_preprocessor" | "2_planner" | "3_middleware" | "4_workers" | "5_validator";
@@ -31,6 +31,8 @@ export interface Project {
   audioDurationSec: number;
   transcriptText: string;
   rawTranscript?: RawTranscriptJSON | null;
+  entityRequirements?: EntityImageRequirement[] | null;
+  uploadedAssets?: UploadedImageAsset[];
 
   // Pipeline output
   beats: Beat[];
@@ -241,6 +243,113 @@ export async function deleteAudioBlob(projectId: string): Promise<void> {
     });
     db.close();
   } catch {}
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Project Image Assets Persistence (IndexedDB + Disk Mirror)
+// ──────────────────────────────────────────────────────────────────────────────
+
+export async function saveProjectAsset(projectId: string, standardizedFilename: string, blob: Blob): Promise<void> {
+  const assetKey = `asset:${projectId}:${standardizedFilename}`;
+  try {
+    const db = await openDB();
+    await new Promise<void>((res, rej) => {
+      const tx = db.transaction(STORE_BLOBS, "readwrite");
+      tx.objectStore(STORE_BLOBS).put(blob, assetKey);
+      tx.oncomplete = () => res();
+      tx.onerror = () => rej(tx.error);
+    });
+    db.close();
+  } catch (err) {
+    console.warn("Failed to store asset blob in IndexedDB:", err);
+  }
+
+  // Also mirror to disk via Vite dev server API
+  try {
+    await fetch(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(standardizedFilename)}`, {
+      method: "POST",
+      headers: { "Content-Type": blob.type || "image/jpeg" },
+      body: blob,
+    });
+  } catch (err) {
+    console.warn("Failed to stream asset to disk:", err);
+  }
+}
+
+export async function loadProjectAsset(projectId: string, standardizedFilename: string): Promise<Blob | null> {
+  const assetKey = `asset:${projectId}:${standardizedFilename}`;
+  try {
+    const db = await openDB();
+    const blob = await new Promise<Blob | null>((res) => {
+      const tx = db.transaction(STORE_BLOBS, "readonly");
+      const req = tx.objectStore(STORE_BLOBS).get(assetKey);
+      req.onsuccess = () => res((req.result as Blob) || null);
+      req.onerror = () => res(null);
+    });
+    db.close();
+    if (blob) return blob;
+  } catch {}
+
+  // Fetch from disk endpoint fallback
+  try {
+    const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(standardizedFilename)}`);
+    if (res.ok) {
+      const diskBlob = await res.blob();
+      // Cache in IDB
+      try {
+        const db = await openDB();
+        const tx = db.transaction(STORE_BLOBS, "readwrite");
+        tx.objectStore(STORE_BLOBS).put(diskBlob, assetKey);
+        db.close();
+      } catch {}
+      return diskBlob;
+    }
+  } catch {}
+
+  return null;
+}
+
+export async function deleteProjectAsset(projectId: string, standardizedFilename: string): Promise<void> {
+  const assetKey = `asset:${projectId}:${standardizedFilename}`;
+  try {
+    const db = await openDB();
+    await new Promise<void>((res) => {
+      const tx = db.transaction(STORE_BLOBS, "readwrite");
+      tx.objectStore(STORE_BLOBS).delete(assetKey);
+      tx.oncomplete = () => res();
+      tx.onerror = () => res();
+    });
+    db.close();
+  } catch {}
+
+  try {
+    await fetch(`/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(standardizedFilename)}`, {
+      method: "DELETE",
+    });
+  } catch {}
+}
+
+/**
+ * Resolves valid usable URLs (Blob object URLs or disk endpoints) for all assets in a film or project.
+ */
+export async function resolveProjectAssetUrls(
+  projectId: string,
+  assets: UploadedImageAsset[] = []
+): Promise<Record<string, UploadedImageAsset>> {
+  const map: Record<string, UploadedImageAsset> = {};
+  for (const asset of assets) {
+    const blob = await loadProjectAsset(projectId, asset.standardizedFilename);
+    const resolvedUrl = blob
+      ? URL.createObjectURL(blob)
+      : `/api/projects/${encodeURIComponent(projectId)}/assets/${encodeURIComponent(asset.standardizedFilename)}`;
+    map[asset.standardizedFilename] = {
+      ...asset,
+      url: resolvedUrl,
+    };
+    // Also map by ID for convenience
+    map[asset.id] = map[asset.standardizedFilename];
+  }
+  return map;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
