@@ -12,8 +12,11 @@ import { getEnvStatus, hasValidKey } from "../services/env";
 import { runCreativePipeline, regenerateGeneratedShot } from "../services/creativePipeline";
 import { GeneratedFilmPlayer } from "./GeneratedFilmPlayer";
 import { PipelineProgress, type StageProgress } from "./PipelineProgress";
-import type { GeneratedFilm } from "../sdk/contract.generated";
-import { AlertTriangle, FileText, Music, Sparkles, Upload, Download, Check, Wand2, Settings2, Clapperboard, Play } from "lucide-react";
+import type { GeneratedFilm, EntityImageRequirement, UploadedImageAsset } from "../sdk/contract.generated";
+import { analyzeTranscriptEntities } from "../services/openai";
+import { deleteProjectAsset } from "../services/projects";
+import { EntityAssetIngestionCockpit } from "./EntityAssetIngestionCockpit";
+import { AlertTriangle, FileText, Music, Sparkles, Upload, Download, Check, Wand2, Settings2, Clapperboard, Play, Images } from "lucide-react";
 
 const FPS = 60;
 
@@ -42,6 +45,8 @@ export function Studio({
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [film, setFilm] = useState<GeneratedFilm | null>(null);
   const [draftFilm, setDraftFilm] = useState<GeneratedFilm | null>(null);
+  const [entityRequirements, setEntityRequirements] = useState<EntityImageRequirement[]>([]);
+  const [uploadedAssets, setUploadedAssets] = useState<UploadedImageAsset[]>([]);
   const [processing, setProcessing] = useState(false);
   const [aligning, setAligning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +74,8 @@ export function Studio({
         setRawTranscript(null);
         setFilm(null);
         setDraftFilm(null);
+        setEntityRequirements([]);
+        setUploadedAssets([]);
         setAudioFile(null);
         setAudioDuration(0);
         setPipelineLogs([]);
@@ -128,6 +135,8 @@ export function Studio({
       pipelineLogsRef.current = logsToSet;
       setFilm(p.generatedFilm ?? null);
       setDraftFilm(p.pipelineDraft ?? null);
+      setEntityRequirements(p.entityRequirements || p.generatedFilm?.entityRequirements || p.pipelineDraft?.entityRequirements || []);
+      setUploadedAssets(p.assets || p.generatedFilm?.assets || p.pipelineDraft?.assets || []);
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
       if (p.audioUrl?.startsWith("blob:")) {
@@ -161,6 +170,8 @@ export function Studio({
         audioFileName: audioFile?.name,
         audioDurationSec: audioDuration || 0,
         rawTranscript,
+        entityRequirements,
+        assets: uploadedAssets,
       });
       setProject(current);
       setActiveProjectId(current.id);
@@ -174,7 +185,47 @@ export function Studio({
       }
     }
     return current;
-  }, [project, projectTitle, transcriptText, audioFile, audioDuration, rawTranscript, onProjectIdChange]);
+  }, [project, projectTitle, transcriptText, audioFile, audioDuration, rawTranscript, entityRequirements, uploadedAssets, onProjectIdChange]);
+
+  const handleAssetUploaded = useCallback(async (asset: UploadedImageAsset) => {
+    const p = ensureProject();
+    setUploadedAssets((prev) => {
+      const next = [...prev.filter((a) => a.standardizedFilename !== asset.standardizedFilename), asset];
+      updateProject(p.id, { assets: next });
+      return next;
+    });
+    if (film) {
+      const updatedFilm = {
+        ...film,
+        assets: [...(film.assets || []).filter((a) => a.standardizedFilename !== asset.standardizedFilename), asset],
+      };
+      setFilm(updatedFilm);
+      updateProject(p.id, { generatedFilm: updatedFilm });
+    }
+    onProjectChange?.();
+  }, [ensureProject, film, onProjectChange]);
+
+  const handleAssetDeleted = useCallback(async (assetId: string) => {
+    const p = ensureProject();
+    const target = uploadedAssets.find((a) => a.id === assetId);
+    if (target) {
+      await deleteProjectAsset(p.id, target.standardizedFilename);
+    }
+    setUploadedAssets((prev) => {
+      const next = prev.filter((a) => a.id !== assetId);
+      updateProject(p.id, { assets: next });
+      return next;
+    });
+    if (film) {
+      const updatedFilm = {
+        ...film,
+        assets: (film.assets || []).filter((a) => a.id !== assetId),
+      };
+      setFilm(updatedFilm);
+      updateProject(p.id, { generatedFilm: updatedFilm });
+    }
+    onProjectChange?.();
+  }, [ensureProject, uploadedAssets, film, onProjectChange]);
 
   const handleAudioUpload = useCallback(async (file: File) => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -224,7 +275,7 @@ export function Studio({
 
   const handlePipelineRun = useCallback(async (opts?: {
     resume?: boolean;
-    startFromStage?: "audio-align" | "planning" | "art-direction" | "coding" | "validation";
+    startFromStage?: "audio-align" | "entity-assets" | "planning" | "art-direction" | "coding" | "validation";
   }) => {
     setError(null);
     if (!apiReady) {
@@ -237,7 +288,7 @@ export function Studio({
       return;
     }
     setProcessing(true);
-    const isFullRestart = !opts?.resume && (!opts?.startFromStage || opts.startFromStage === "planning" || opts.startFromStage === "audio-align");
+    const isFullRestart = !opts?.resume && (!opts?.startFromStage || opts.startFromStage === "audio-align");
     if (isFullRestart) {
       setPipelineLogs([]);
       pipelineLogsRef.current = [];
@@ -321,6 +372,8 @@ export function Studio({
         audioFileName: audioFile?.name ?? project?.audioFileName,
         audioUrl: undefined,
         rawTranscript: raw,
+        entityRequirements,
+        assets: uploadedAssets,
         status: "processing",
         ...(isFullRestart
           ? { pipelineDraft: null, generatedFilm: null, failedStage: null, pipelineLogs: [] }
@@ -330,6 +383,42 @@ export function Studio({
       setAudioDuration(duration);
       setTranscriptText(finalText);
       setRawTranscript(raw);
+
+      // Handle isolated Stage 1.5 run:
+      if (opts?.startFromStage === "entity-assets") {
+        log({
+          stage: "1.5_entity-assets",
+          message: "Analyzing transcript to detect key entities (figures, products, landmarks) requiring visual imagery...",
+          status: "running",
+          timestamp: Date.now(),
+        });
+        setStageProgress({ stage: "entity-assets", completed: 0, total: 1, message: "Analyzing visual entities in transcript" });
+        const discovered = await analyzeTranscriptEntities({
+          transcript: finalText,
+          sentences: raw?.sentences || [],
+          creativeBrief: creativeBrief.trim() || undefined,
+          onProgress: (m) => log({ stage: "1.5_entity-assets", message: m, status: "running", timestamp: Date.now() }),
+        });
+        setEntityRequirements(discovered);
+        setStageProgress({ stage: "entity-assets", completed: 1, total: 1, message: `${discovered.length} entities identified` });
+        log({
+          stage: "1.5_entity-assets",
+          message: discovered.length > 0
+            ? `Detected ${discovered.length} entities that would elevate video presentation: ${discovered.map((d) => d.name).join(", ")}. Review and upload images below before proceeding to planning.`
+            : "No specific real-world figures or products requiring images detected. Relying on bespoke motion graphics.",
+          status: "success",
+          timestamp: Date.now(),
+          detail: discovered.map((e) => `• ${e.name} (${e.category}) -> Slug: ${e.targetFilename} | Importance: ${e.importance}\n  Rationale: ${e.rationale}\n  Fallback: ${e.cleverFallbackIdea}`).join("\n\n"),
+        });
+        const updatedProj = updateProject(p.id, {
+          entityRequirements: discovered,
+          pipelineLogs: pipelineLogsRef.current,
+          status: "ready",
+        });
+        if (updatedProj) setProject(updatedProj);
+        onProjectChange?.();
+        return;
+      }
 
       // Determine resume target:
       // If restarting from scratch or planning, clear the resume target so it generates a fresh storyboard
@@ -348,21 +437,33 @@ export function Studio({
         alignmentConfidence: confidence,
         resumeFilm: resumeTarget,
         startFromStage: opts?.startFromStage,
+        entityRequirements: entityRequirements.length > 0 ? entityRequirements : undefined,
+        availableAssets: uploadedAssets.length > 0 ? uploadedAssets : undefined,
         onLog: log,
         onStage: (stage, completed, total, message) => setStageProgress({ stage, completed, total, message }),
         onSaveSnapshot: (snapshot, _stage) => {
           setDraftFilm(snapshot);
+          if (snapshot.entityRequirements?.length && !entityRequirements.length) {
+            setEntityRequirements(snapshot.entityRequirements);
+          }
+          if (snapshot.assets?.length && !uploadedAssets.length) {
+            setUploadedAssets(snapshot.assets);
+          }
           updateProject(p.id, {
             pipelineDraft: snapshot,
             failedStage: null,
             status: "processing",
             pipelineLogs: pipelineLogsRef.current,
+            entityRequirements: snapshot.entityRequirements || entityRequirements,
+            assets: snapshot.assets || uploadedAssets,
           });
         },
       });
 
       setFilm(resultFilm);
       setDraftFilm(null);
+      if (resultFilm.entityRequirements?.length) setEntityRequirements(resultFilm.entityRequirements);
+      if (resultFilm.assets?.length) setUploadedAssets(resultFilm.assets);
       const finalLogs: PipelineLog[] = [
         ...pipelineLogsRef.current,
         { stage: "5_validator", message: "All model-authored scenes compiled and smoke rendered.", status: "success", timestamp: Date.now() },
@@ -375,6 +476,8 @@ export function Studio({
         audioDurationSec: duration,
         rawTranscript: raw,
         generatedFilm: resultFilm,
+        entityRequirements: resultFilm.entityRequirements || entityRequirements,
+        assets: resultFilm.assets || uploadedAssets,
         pipelineDraft: null,
         failedStage: null,
         beats: [],
@@ -405,7 +508,7 @@ export function Studio({
       setAligning(false);
       setProcessing(false);
     }
-  }, [apiReady, audioFile, rawTranscript, transcriptText, audioDuration, hasValidKey, onOpenSettings, onProjectChange, pipelineLogs, ensureProject, projectTitle, project, creativeBrief, draftFilm, film]);
+  }, [apiReady, audioFile, rawTranscript, transcriptText, audioDuration, hasValidKey, onOpenSettings, onProjectChange, pipelineLogs, ensureProject, projectTitle, project, creativeBrief, draftFilm, film, entityRequirements, uploadedAssets]);
 
   const regenerateShot = useCallback(async (shotId: string, validationError?: string) => {
     if (!film) return;
@@ -704,6 +807,18 @@ export function Studio({
                 {processing || aligning ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Wand2 className="w-4 h-4" />}
                 {aligning ? "Aligning to speech…" : processing ? "Generating…" : (film || draftFilm) ? "Restart film (from scratch)" : "Generate film"}
               </button>
+              <button
+                type="button"
+                disabled={!canGenerate || processing || aligning}
+                onClick={() => void handlePipelineRun({ startFromStage: "entity-assets" })}
+                className="w-full min-h-[38px] rounded-xl bg-[color:var(--color-surface)] border border-[color:var(--color-border)] hover:bg-[color:var(--color-surface-3)] text-[color:var(--color-text)] font-medium text-xs flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-40"
+                title="Scan transcript to extract key entities requiring images before planning"
+              >
+                <Images className="w-3.5 h-3.5 text-blue-500" />
+                {entityRequirements.length > 0
+                  ? `Entities Discovered (${uploadedAssets.length}/${entityRequirements.length} uploaded)`
+                  : "Discover Entity Images (Phase 1.5)"}
+              </button>
               {!apiReady && (
                 <button onClick={onOpenSettings} className="text-xs text-amber-600 dark:text-amber-300 underline underline-offset-2">
                   Add a model API key to enable generation
@@ -734,6 +849,27 @@ export function Studio({
               project={project}
               onContinue={() => void handlePipelineRun({ resume: true })}
               onStartFromStage={(stage) => void handlePipelineRun({ startFromStage: stage })}
+            />
+          </section>
+        )}
+
+        {/* ── ENTITY ASSETS COCKPIT (Stage 1.5 Ingestion & Choreography) ── */}
+        {entityRequirements.length > 0 && (
+          <section className="mb-6">
+            <EntityAssetIngestionCockpit
+              projectId={project?.id || "temp-project"}
+              entities={entityRequirements}
+              uploadedAssets={uploadedAssets}
+              isProcessing={processing && stageProgress?.stage === "entity-assets"}
+              onAssetUploaded={handleAssetUploaded}
+              onAssetRemoved={handleAssetDeleted}
+              onProceed={() => void handlePipelineRun({ startFromStage: "planning" })}
+              onSkipAll={() => void handlePipelineRun({ startFromStage: "planning" })}
+              onAddCustomEntity={(custom) => {
+                const next = [...entityRequirements, custom];
+                setEntityRequirements(next);
+                if (project) updateProject(project.id, { entityRequirements: next });
+              }}
             />
           </section>
         )}

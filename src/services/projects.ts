@@ -33,6 +33,7 @@ export interface Project {
   rawTranscript?: RawTranscriptJSON | null;
   entityRequirements?: EntityImageRequirement[] | null;
   uploadedAssets?: UploadedImageAsset[];
+  assets?: UploadedImageAsset[];
 
   // Pipeline output
   beats: Beat[];
@@ -582,7 +583,17 @@ export async function getProjectAsync(id: string): Promise<Project | null> {
   return fromLS;
 }
 
-export function createProject(opts: { title: string; transcriptText?: string; audioFileName?: string; audioDurationSec?: number; audioUrl?: string; rawTranscript?: RawTranscriptJSON | null }): Project {
+export function createProject(opts: {
+  title: string;
+  transcriptText?: string;
+  audioFileName?: string;
+  audioDurationSec?: number;
+  audioUrl?: string;
+  rawTranscript?: RawTranscriptJSON | null;
+  entityRequirements?: EntityImageRequirement[] | null;
+  assets?: UploadedImageAsset[];
+  uploadedAssets?: UploadedImageAsset[];
+}): Project {
   const id = `proj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const project: Project = {
     id,
@@ -595,6 +606,9 @@ export function createProject(opts: { title: string; transcriptText?: string; au
     audioDurationSec: opts.audioDurationSec ?? 30,
     transcriptText: opts.transcriptText ?? "",
     rawTranscript: opts.rawTranscript ?? null,
+    entityRequirements: opts.entityRequirements ?? null,
+    assets: opts.assets || opts.uploadedAssets || [],
+    uploadedAssets: opts.uploadedAssets || opts.assets || [],
     beats: [],
     shots: [],
     frameLocked: [],
