@@ -109,6 +109,96 @@ function projectsApiPlugin(): import("vite").Plugin {
           return;
         }
 
+        // 4b. Asset upload: POST /api/projects/:id/assets/:filename
+        const assetFileMatch = pathname.match(/^\/api\/projects\/([^/]+)\/assets\/([^/]+)$/);
+        if (assetFileMatch && req.method === "POST") {
+          const id = decodeURIComponent(assetFileMatch[1]);
+          const filename = decodeURIComponent(assetFileMatch[2]);
+          const assetDir = path.join(projectsDir, `${id}_assets`);
+          if (!fs.existsSync(assetDir)) {
+            fs.mkdirSync(assetDir, { recursive: true });
+          }
+          const assetPath = path.join(assetDir, filename);
+          const fileStream = fs.createWriteStream(assetPath);
+          req.pipe(fileStream);
+          fileStream.on("finish", () => {
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: true, filename, url: `/api/projects/${encodeURIComponent(id)}/assets/${encodeURIComponent(filename)}` }));
+          });
+          fileStream.on("error", (err) => {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: err.message }));
+          });
+          return;
+        }
+
+        // 4c. Asset serve: GET /api/projects/:id/assets/:filename
+        if (assetFileMatch && req.method === "GET") {
+          const id = decodeURIComponent(assetFileMatch[1]);
+          const filename = decodeURIComponent(assetFileMatch[2]);
+          const assetPath = path.join(projectsDir, `${id}_assets`, filename);
+          if (!fs.existsSync(assetPath)) {
+            res.statusCode = 404;
+            res.end(JSON.stringify({ error: "Asset not found" }));
+            return;
+          }
+          const stat = fs.statSync(assetPath);
+          const ext = path.extname(filename).toLowerCase();
+          const mime = ext === ".png" ? "image/png"
+            : (ext === ".jpg" || ext === ".jpeg") ? "image/jpeg"
+            : ext === ".webp" ? "image/webp"
+            : ext === ".svg" ? "image/svg+xml"
+            : ext === ".gif" ? "image/gif"
+            : ext === ".avif" ? "image/avif"
+            : "application/octet-stream";
+
+          res.setHeader("Content-Type", mime);
+          res.setHeader("Content-Length", stat.size);
+          res.setHeader("Cache-Control", "public, max-age=86400");
+          fs.createReadStream(assetPath).pipe(res);
+          return;
+        }
+
+        // 4d. Asset delete: DELETE /api/projects/:id/assets/:filename
+        if (assetFileMatch && req.method === "DELETE") {
+          const id = decodeURIComponent(assetFileMatch[1]);
+          const filename = decodeURIComponent(assetFileMatch[2]);
+          const assetPath = path.join(projectsDir, `${id}_assets`, filename);
+          if (fs.existsSync(assetPath)) {
+            try { fs.unlinkSync(assetPath); } catch {}
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        // 4e. Asset list: GET /api/projects/:id/assets
+        const assetListMatch = pathname.match(/^\/api\/projects\/([^/]+)\/assets$/);
+        if (assetListMatch && req.method === "GET") {
+          const id = decodeURIComponent(assetListMatch[1]);
+          const assetDir = path.join(projectsDir, `${id}_assets`);
+          const list: Array<{ filename: string; size: number; url: string }> = [];
+          if (fs.existsSync(assetDir)) {
+            const files = fs.readdirSync(assetDir);
+            for (const f of files) {
+              const p = path.join(assetDir, f);
+              try {
+                const s = fs.statSync(p);
+                if (s.isFile()) {
+                  list.push({
+                    filename: f,
+                    size: s.size,
+                    url: `/api/projects/${encodeURIComponent(id)}/assets/${encodeURIComponent(f)}`,
+                  });
+                }
+              } catch {}
+            }
+          }
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify(list));
+          return;
+        }
+
         // 5. GET /api/projects
         if (pathname === "/api/projects" && req.method === "GET") {
           try {
@@ -186,6 +276,10 @@ function projectsApiPlugin(): import("vite").Plugin {
             if (f.startsWith(`${id}_audio`)) {
               try { fs.unlinkSync(path.join(projectsDir, f)); } catch {}
             }
+          }
+          const assetDir = path.join(projectsDir, `${id}_assets`);
+          if (fs.existsSync(assetDir)) {
+            try { fs.rmSync(assetDir, { recursive: true, force: true }); } catch {}
           }
           res.setHeader("Content-Type", "application/json");
           res.end(JSON.stringify({ ok: true }));
