@@ -2,7 +2,7 @@
 // this file only supplies the shared 60fps timeline, audio track, edit grammar,
 // and film finish.
 
-import type { ComponentType } from "react";
+import { useMemo, type ComponentType } from "react";
 import { Audio } from "@remotion/media";
 import {
   AbsoluteFill,
@@ -12,7 +12,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import type { GeneratedFilm, GeneratedSceneShot } from "../sdk/contract.generated";
+import type { GeneratedFilm, GeneratedSceneShot, UploadedImageAsset } from "../sdk/contract.generated";
 import { ACT_INFO } from "../variety/taxonomy";
 import { FilmFinish } from "./core";
 import type { GeneratedSceneProps } from "../services/generatedCode";
@@ -87,11 +87,24 @@ export interface GeneratedFilmInputProps {
   film: GeneratedFilm;
   scenes: GeneratedMap;
   audioSrc?: string;
+  assets?: Record<string, UploadedImageAsset>;
 }
 
-export function GeneratedFilmComposition({ film, scenes, audioSrc }: GeneratedFilmInputProps) {
+export function GeneratedFilmComposition({ film, scenes, audioSrc, assets }: GeneratedFilmInputProps) {
   const config = useVideoConfig();
   const frame = useCurrentFrame();
+
+  const assetMap = useMemo(() => {
+    const map: Record<string, UploadedImageAsset> = { ...(assets || {}) };
+    if (film.assets) {
+      for (const a of film.assets) {
+        map[a.standardizedFilename] = a;
+        map[a.id] = a;
+      }
+    }
+    return map;
+  }, [assets, film.assets]);
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#070a12", overflow: "hidden" }}>
       {film.shots.map((shot) => {
@@ -104,7 +117,7 @@ export function GeneratedFilmComposition({ film, scenes, audioSrc }: GeneratedFi
               visualPrompt={shot.visualPrompt!}
               wordCues={shot.wordCues}
               continuity={shot.continuity}
-              assets={[]}
+              assets={assetMap}
             />
           </Sequence>
         );

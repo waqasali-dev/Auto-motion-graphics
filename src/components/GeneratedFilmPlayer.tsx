@@ -5,11 +5,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Player, Thumbnail, type PlayerRef } from "@remotion/player";
 import { canRenderMediaOnWeb, renderMediaOnWeb } from "@remotion/web-renderer";
 import { Download, Film, LoaderCircle, Play, RefreshCw, TriangleAlert } from "lucide-react";
-import type { GeneratedFilm } from "../sdk/contract.generated";
+import type { GeneratedFilm, UploadedImageAsset } from "../sdk/contract.generated";
 import type { GeneratedSceneComponent } from "../services/generatedCode";
-import { compileGeneratedShot } from "../services/generatedCode";
+import { compileGeneratedShot, createFallbackShotSource } from "../services/generatedCode";
 import { GeneratedFilmComposition } from "../mg/GeneratedFilm";
-import { saveRenderBlob, loadRenderBlob, updateProject } from "../services/projects";
+import { saveRenderBlob, loadRenderBlob, updateProject, resolveProjectAssetUrls } from "../services/projects";
 import { AudioTimeline } from "./AudioTimeline";
 
 const FPS = 60;
@@ -39,18 +39,53 @@ export function GeneratedFilmPlayer({
   const [inspectCode, setInspectCode] = useState(false);
 
   const compiled = useMemo(() => {
-    try {
-      const map: Record<string, GeneratedSceneComponent> = {};
-      for (const shot of film.shots) map[shot.shotId] = compileGeneratedShot(shot.sourceCode).component;
-      return { scenes: map, error: null as string | null };
-    } catch (e) {
-      return { scenes: {} as Record<string, GeneratedSceneComponent>, error: (e as Error).message };
-    }
-  }, [film]);
-  const compileError = compiled.error;
+    const map: Record<string, GeneratedSceneComponent> = {};
+    const errors: Record<string, string> = {};
 
+    for (const shot of film.shots) {
+      try {
+        if (!shot.sourceCode) throw new Error("No source code authored yet");
+        map[shot.shotId] = compileGeneratedShot(shot.sourceCode).component;
+      } catch (e) {
+        errors[shot.shotId] = (e as Error).message;
+        try {
+          const fallbackSource = createFallbackShotSource(shot, {
+            palette: film.visualContinuity?.palette,
+            typography: film.visualContinuity?.typography,
+          });
+          map[shot.shotId] = compileGeneratedShot(fallbackSource).component;
+        } catch {
+          // ignore fallback compile error
+        }
+      }
+    }
+
+    const hasAnyScene = Object.keys(map).length > 0;
+    const fatalError = !hasAnyScene ? (Object.values(errors)[0] || "No scenes could be compiled.") : null;
+
+    return { scenes: map, errors, fatalError };
+  }, [film]);
+
+  const compileError = compiled.fatalError;
   const currentShot = film.shots.find((s) => currentFrame >= s.startFrame && currentFrame < s.endFrame) ?? film.shots[0];
-  const inputProps = useMemo(() => ({ film, scenes: compiled.scenes, audioSrc }), [film, compiled.scenes, audioSrc]);
+  const currentShotError = currentShot ? compiled.errors[currentShot.shotId] : null;
+
+  const [resolvedAssets, setResolvedAssets] = useState<Record<string, UploadedImageAsset>>({});
+
+  useEffect(() => {
+    let active = true;
+    resolveProjectAssetUrls(projectId, film.assets).then((map) => {
+      if (active) setResolvedAssets(map);
+    });
+    return () => {
+      active = false;
+    };
+  }, [projectId, film.assets]);
+
+  const inputProps = useMemo(
+    () => ({ film, scenes: compiled.scenes, audioSrc, assets: resolvedAssets }),
+    [film, compiled.scenes, audioSrc, resolvedAssets]
+  );
 
   // Read the Player as the single clock source, including its internally mixed audio.
   useEffect(() => {
@@ -155,6 +190,24 @@ export function GeneratedFilmPlayer({
 
   return (
     <div className="space-y-4">
+      {currentShotError && !compileError && (
+        <div className="px-3 py-2 rounded-xl bg-amber-950/60 border border-amber-600/40 text-amber-200 text-xs flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 truncate">
+            <TriangleAlert className="w-4 h-4 text-amber-400 shrink-0" />
+            <span className="truncate">
+              <strong>{currentShot?.shotId}</strong> rendered with auto-recovery fallback: {currentShotError}
+            </span>
+          </div>
+          {onRegenerateShot && currentShot && (
+            <button
+              onClick={() => onRegenerateShot(currentShot.shotId, currentShotError)}
+              className="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-black font-semibold text-[11px] shrink-0"
+            >
+              Regenerate Scene
+            </button>
+          )}
+        </div>
+      )}
       <div className="bg-[#0b0d12] rounded-2xl border border-zinc-800 p-3 md:p-4">
         {compileError ? (
           <div className="aspect-video flex items-center justify-center p-8 text-center text-red-200">
@@ -241,13 +294,47 @@ export function GeneratedFilmPlayer({
 }
 
 /** Real frame from this project's generated Remotion code, used in the library. */
-export function GeneratedFilmPoster({ film, frame = 90 }: { film: GeneratedFilm; frame?: number }) {
+export function GeneratedFilmPoster({
+  film,
+  frame = 90,
+  assets,
+}: {
+  film: GeneratedFilm;
+  frame?: number;
+  assets?: Record<string, UploadedImageAsset>;
+}) {
   const compiled = useMemo(() => {
     const map: Record<string, GeneratedSceneComponent> = {};
-    for (const shot of film.shots) map[shot.shotId] = compileGeneratedShot(shot.sourceCode).component;
+    for (const shot of film.shots) {
+      try {
+        if (shot.sourceCode) {
+          map[shot.shotId] = compileGeneratedShot(shot.sourceCode).component;
+        }
+      } catch {
+        try {
+          const fallback = createFallbackShotSource(shot, {
+            palette: film.visualContinuity?.palette,
+            typography: film.visualContinuity?.typography,
+          });
+          map[shot.shotId] = compileGeneratedShot(fallback).component;
+        } catch {
+          // ignore
+        }
+      }
+    }
     return map;
   }, [film]);
-  const inputProps = useMemo(() => ({ film, scenes: compiled }), [film, compiled]);
+
+  const inputProps = useMemo(() => ({ film, scenes: compiled, assets }), [film, compiled, assets]);
+
+  if (Object.keys(compiled).length === 0) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-zinc-900 text-zinc-500 font-mono text-xs">
+        Preview Unavailable
+      </div>
+    );
+  }
+
   return (
     <Thumbnail
       component={GeneratedFilmComposition as unknown as React.ComponentType<Record<string, unknown>>}
