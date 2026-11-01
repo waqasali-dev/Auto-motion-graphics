@@ -12,6 +12,9 @@ import type {
   GeneratedCodeOutput,
   ShotVisualPrompt,
   WordCue,
+  EntityAnalysisOutput,
+  EntityImageRequirement,
+  UploadedImageAsset,
 } from "../sdk/contract.generated";
 
 export const AGENTROUTER_HEADERS: Record<string, string> = {
@@ -661,11 +664,26 @@ const CREATIVE_PLAN_SCHEMA = {
             transitionIn: { type: "string", enum: CUTS },
             transitionDirection: { type: "integer", enum: [-1, 1] },
             continuityNote: { type: "string" },
+            assignedAssets: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  assetId: { type: "string" },
+                  standardizedFilename: { type: "string" },
+                  status: { type: "string", enum: ["provided", "missing_fallback"] },
+                  role: { type: "string" },
+                  placement: { type: "string" },
+                },
+                required: ["assetId", "standardizedFilename", "status", "role", "placement"],
+                additionalProperties: false,
+              },
+            },
           },
           required: [
             "shotId", "sentenceStartIndex", "sentenceEndIndex", "spokenText", "cleanedDisplaySentences",
             "purpose", "visualIdea", "keyEvidence", "emphasisWordIndices", "visualFamily", "themeMode",
-            "energy", "transitionIn", "transitionDirection", "continuityNote",
+            "energy", "transitionIn", "transitionDirection", "continuityNote", "assignedAssets",
           ],
           additionalProperties: false,
         },
@@ -863,6 +881,122 @@ YOU MUST FIX THIS NOW:
   throw new Error("Failed to receive structured response.");
 }
 
+const ENTITY_ANALYSIS_SCHEMA = {
+  name: "entity_analysis",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      overallVisualTheme: { type: "string" },
+      entities: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Clean lowercase snake_case identifier, e.g. king_baldwin, elon_musk" },
+            name: { type: "string", description: "Human-readable entity title, e.g. King Baldwin IV" },
+            targetFilename: { type: "string", description: "Canonical filename prefix without extension, e.g. king_baldwin" },
+            category: {
+              type: "string",
+              enum: ["person", "historical", "product", "organization", "location", "object"],
+            },
+            rationale: { type: "string", description: "Why an image of this entity is critical for video presentation" },
+            suggestedFraming: {
+              type: "string",
+              enum: ["portrait", "landscape", "square", "transparent_cutout"],
+            },
+            recommendedResolution: { type: "string" },
+            importance: {
+              type: "string",
+              enum: ["essential", "recommended", "optional"],
+            },
+            sentenceIndices: {
+              type: "array",
+              items: { type: "integer" },
+            },
+            cleverFallbackIdea: {
+              type: "string",
+              description: "Clever motion graphic alternative if user provides no image (e.g. regal monogram, heraldic seal, dossier card, vector cartography)",
+            },
+          },
+          required: ["id", "name", "targetFilename", "category", "rationale", "suggestedFraming", "importance", "sentenceIndices", "cleverFallbackIdea"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["entities"],
+    additionalProperties: false,
+  },
+} as const;
+
+/**
+ * Phase 1.5: Analyze transcript to extract key entities requiring images for presentation.
+ * Returns required entities with canonical target filenames and clever fallback ideas.
+ */
+export async function analyzeTranscriptEntities(args: {
+  transcript: string;
+  sentences: Array<{ index: number; text: string; start?: number; end?: number }>;
+  creativeBrief?: string;
+  onProgress?: (msg: string) => void;
+}): Promise<EntityImageRequirement[]> {
+  const system = `You are an elite motion-graphics archival researcher and visual director for documentary and explainer videos (1920x1080 @ 60fps).
+Your mission: Analyze the narration transcript completely and identify real-world ENTITIES that drastically elevate the viewer's understanding and visual engagement if photographic/illustrative images are provided.
+
+TARGET ENTITIES TO DETECT:
+1. Historical & Prominent Figures: Kings, emperors, generals, scientists, politicians, CEOs (e.g. King Baldwin IV, Saladin, Elon Musk, Bill Gates, Oppenheimer).
+2. Iconic Products & Inventions: Specific hardware, vehicles, spacecraft, architectural landmarks, flagship gadgets (e.g. Apple Vision Pro, SR-71 Blackbird, Falcon 9).
+3. Institutions & Organizations: Specific companies, agencies, kingdoms, empires, dynasties (e.g. Kingdom of Jerusalem, NASA, DeepMind).
+4. Critical Historical Documents & Artifacts: Treaties, maps, paintings, relics (e.g. Magna Carta, Silver Mask of Baldwin).
+
+CRITICAL DIRECTIVES:
+- Only flag tangible entities where a real visual image (portrait, photograph, historical illustration, official logo) makes the audience say: "Yes! Now I see who/what we are listening to."
+- Do NOT flag abstract generic concepts (do not flag "money", "freedom", "success", "future", "war").
+- Generate a canonical slug for 'id' and 'targetFilename' using strictly lowercase letters, numbers, and underscores (e.g. 'king_baldwin', 'elon_musk').
+- For 'suggestedFraming', select the most natural aspect ratio for this entity:
+  - 'portrait': ideal for individual human figures, monarchs, executives.
+  - 'landscape': ideal for locations, battles, vehicles, wide landscapes.
+  - 'square': ideal for profile tokens, products, emblems.
+  - 'transparent_cutout': ideal for objects, devices, cut-out character stills.
+- For 'cleverFallbackIdea': Images are 100% OPTIONAL for the user. Therefore, define a clever, creative motion graphics backup design (e.g. regal serif monogram with roman numerals, vector heraldic seal, classified dossier card with redacted callout, or cartographic pin) in case the user does not upload an image!`;
+
+  const sentenceDigest = args.sentences
+    .map((s) => `[S${s.index}] ${s.text}`)
+    .join("\n");
+
+  const prompt = `TRANSCRIPT DIGEST:
+${sentenceDigest}
+
+${args.creativeBrief ? `CREATIVE BRIEF:\n${args.creativeBrief}\n` : ""}
+
+Identify all visual entities in this transcript that would benefit from imagery. Produce the structured entity requirements list.`;
+
+  args.onProgress?.("Analyzing transcript for visual entity image requirements...");
+  const result = await structured<EntityAnalysisOutput>(ENTITY_ANALYSIS_SCHEMA, system, prompt, {
+    temperature: 0.3,
+    maxTokens: 4000,
+  });
+
+  const cleaned = (result.entities || []).map((e) => {
+    const safeSlug = (e.id || e.targetFilename || e.name || "entity")
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+    return {
+      ...e,
+      id: safeSlug || `entity_${Math.random().toString(36).slice(2, 6)}`,
+      targetFilename: safeSlug || `entity_${Math.random().toString(36).slice(2, 6)}`,
+      name: e.name || safeSlug,
+      category: e.category || "person",
+      suggestedFraming: e.suggestedFraming || "portrait",
+      importance: e.importance || "recommended",
+      sentenceIndices: Array.isArray(e.sentenceIndices) ? e.sentenceIndices : [],
+      cleverFallbackIdea: e.cleverFallbackIdea || "Regal serif monogram and stylized vector heraldic emblem",
+    };
+  });
+
+  return cleaned;
+}
+
 export interface PlanWindow {
   /** 0-based window number and total, for multi-part planning of long films. */
   index: number;
@@ -890,6 +1024,8 @@ export async function planCreativeFilm(args: {
   creativeBrief?: string;
   repairErrors?: string[];
   window?: PlanWindow;
+  availableAssets?: UploadedImageAsset[];
+  entityRequirements?: EntityImageRequirement[];
 }): Promise<CreativePlanOutput> {
   const system = `You are the CREATIVE DIRECTOR and MOTION GRAPHICS SUPERVISOR for a bespoke Remotion 2D animated film (1920x1080 @ 60fps).
 BENCHMARK: Premium documentary, thriller, and explainer channels (Vox, Johnny Harris, Magnates Media, ColdFusion, Bloomberg Quicktake).
@@ -997,10 +1133,35 @@ Dark-theme shots allowed in THIS part: ${w.darkBudget}.
     ? `Part ${w.index + 1} of ${w.total}: speech duration ${partDurationSec}s (Total film: ${totalFilmSec}s).`
     : `Audio duration: ${partDurationSec}s (${args.durationFrames} frames at 60fps).`;
 
+  let assetContext = "";
+  if ((args.availableAssets && args.availableAssets.length > 0) || (args.entityRequirements && args.entityRequirements.length > 0)) {
+    const uploaded = args.availableAssets || [];
+    const reqs = args.entityRequirements || [];
+    const lines: string[] = ["─── ENTITY IMAGE ASSETS STATUS & CHOREOGRAPHY DIRECTIVES ───"];
+    if (uploaded.length > 0) {
+      lines.push("AVAILABLE UPLOADED IMAGE ASSETS:");
+      for (const a of uploaded) {
+        lines.push(`• [UPLOADED] ${a.standardizedFilename}: "${a.entityName}" (${a.width}×${a.height}, ${a.aspectRatioLabel})`);
+      }
+      lines.push("DIRECTIVE FOR UPLOADED ASSETS: In shots where these entities are discussed, you MUST prominently feature their image! Adapt the spatial layout to the real aspect ratio (e.g. portrait in left/right half, or center hero portrait with cinematic vignette). Include the asset filename in your visualIdea and assignedAssets array.");
+    }
+    const missing = reqs.filter((r) => !uploaded.some((u) => u.id === r.id || u.standardizedFilename.startsWith(r.targetFilename)));
+    if (missing.length > 0) {
+      lines.push("\nMISSING ASSETS (NO IMAGE PROVIDED BY USER):");
+      for (const m of missing) {
+        lines.push(`• [NO IMAGE] "${m.name}" (Slug: ${m.targetFilename}, Sentences: ${m.sentenceIndices.join(", ")})`);
+        lines.push(`  Clever Alternative: ${m.cleverFallbackIdea}`);
+      }
+      lines.push("DIRECTIVE FOR MISSING ASSETS (CRITICAL): The user did NOT provide images for these entities. NEVER plan generic bullet points or text dumps. Be CLEVER with the presentation: plan high-energy stylized motion graphics such as a regal serif monogram with roman numerals, an animated SVG heraldic seal/emblem via <mg.Stroke>, an archival dossier slab with redacted bars, or a dynamic coordinate beacon on <mg.MapStage>!");
+    }
+    assetContext = "\n" + lines.join("\n") + "\n";
+  }
+
   const prompt = `${args.repairErrors?.length ? `REPAIR THE PREVIOUS PLAN. Fix these exact issues:\n${args.repairErrors.join("\n")}\n\n` : ""}${durationText}
 USER CREATIVE BRIEF (honor unless it conflicts with transcript truth): ${args.creativeBrief || "No extra direction; invent the most apt visual treatment from the narration."}
 Reference finish guidance (inspiration only, do not reproduce): ${args.referenceStyle}
 ${windowBrief}
+${assetContext}
 SENTENCE DIGEST (the only legal shot-boundary source; use words:start..end ranges for emphasisWordIndices):
 ${args.transcriptDigest.join("\n")}
 
@@ -1031,8 +1192,31 @@ export async function generateShotVisualPrompt(args: {
   continuityRules: string[];
   previousSummary: string;
   nextSummary: string;
+  availableAssets?: UploadedImageAsset[];
+  entityRequirements?: EntityImageRequirement[];
 }): Promise<ShotVisualPrompt> {
   const durationFrames = args.shot.durationFrames ?? (args.wordCues.length ? Math.max(120, args.wordCues.at(-1)!.spokenEndFrame + 30) : 180);
+  const matchingAsset = (args.availableAssets || []).find((a) =>
+    args.shot.visualIdea?.includes(a.standardizedFilename) ||
+    args.shot.assignedAssets?.some((as) => as.standardizedFilename === a.standardizedFilename) ||
+    args.shot.visualIdea?.toLowerCase().includes(a.entityName.toLowerCase()) ||
+    args.shot.spokenText.toLowerCase().includes(a.entityName.toLowerCase())
+  );
+  const matchingMissing = (args.entityRequirements || []).find((r) =>
+    !matchingAsset &&
+    r.sentenceIndices.some((idx) => idx >= args.shot.sentenceStartIndex && idx <= args.shot.sentenceEndIndex)
+  );
+
+  let assetDirection = "";
+  if (matchingAsset) {
+    assetDirection = `\nFEATURED IMAGE ASSET AVAILABLE:
+- Standardized File: ${matchingAsset.standardizedFilename}
+- Entity: "${matchingAsset.entityName}" (${matchingAsset.width}×${matchingAsset.height}, ${matchingAsset.aspectRatioLabel})
+DIRECTIVE: Detail how this image enters and rests. Position inside an elegant rounded container (borderRadius: 24px, glassmorphic frosted border, colored glow shadow) preserving its ${matchingAsset.aspectRatioLabel} aspect ratio. Direct camera drift (scale: 1.05 -> 1.0) and staggered typography entry beside or below it.`;
+  } else if (matchingMissing) {
+    assetDirection = `\nMISSING IMAGE FOR ENTITY: "${matchingMissing.name}"
+DIRECTIVE (CLEVER MOTION FALLBACK): The user did NOT provide an image for this entity. NEVER direct generic text. Direct a clever, high-energy motion design treatment: ${matchingMissing.cleverFallbackIdea} (e.g. regal serif initial monogram, stylized vector heraldic emblem, or classified dossier).`;
+  }
   const system = `You are a senior motion-graphics art director writing a visual choreography prompt for a Remotion 2D animator.
 AESTHETIC BENCHMARK: Premium broadcast-quality documentary, thriller, and tech keynote motion design matching the reference demo reel.
 
@@ -1083,7 +1267,7 @@ SHOT STORYBOARD:
 - Spoken Line: "${args.shot.spokenText}"
 - Visual Metaphor & Idea: ${args.shot.visualIdea}
 - Visual Family: ${args.shot.visualFamily} | Theme: ${args.shot.themeMode}
-
+${assetDirection}
 LOCAL WORD CUES (local frames; 60fps):
 ${formatCompactWordCues(args.wordCues)}
 
@@ -1103,6 +1287,7 @@ export async function generateRemotionShotCode(args: {
   filmContinuity: { palette: string; typography: string; texture: string; rules: string[] };
   previousSummary: string;
   nextSummary: string;
+  availableAssets?: UploadedImageAsset[];
   validationError?: string;
   retryNumber?: number;
 }): Promise<GeneratedCodeOutput> {
@@ -1280,6 +1465,41 @@ SOLUTION: Fix this exact issue in your TSX output now.`;
     }
   }
 
+  let assetInstructions = "";
+  if (args.availableAssets && args.availableAssets.length > 0) {
+    const list = args.availableAssets
+      .map((a) => `• props.assets['${a.standardizedFilename}'] (Entity: "${a.entityName}", Dimensions: ${a.width}×${a.height}, ${a.aspectRatioLabel})`)
+      .join("\n");
+    assetInstructions = `\nAVAILABLE IMAGE ASSETS IN PROPS:
+${list}
+
+IMAGE RENDERING RULES (WHEN PRESENT IN SHOT):
+- Remotion <Img /> is fully approved. Import it from "remotion": import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate, spring, Img } from "remotion";
+- Access asset from props.assets:
+  const asset = props.assets?.["${args.availableAssets[0].standardizedFilename}"] || (props.assets ? Object.values(props.assets)[0] : null);
+- Wrap the image in a styled glassmorphic container preserving its aspect ratio:
+  \`\`\`tsx
+  {asset && (
+    <div style={{
+      position: "absolute",
+      left: 140,
+      top: 180,
+      width: 520,
+      height: 680,
+      borderRadius: 24,
+      overflow: "hidden",
+      border: "1px solid rgba(255,255,255,0.15)",
+      boxShadow: "0 24px 80px rgba(0,102,255,0.25)",
+      opacity: enter,
+    }}>
+      <Img src={asset.url} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+    </div>
+  )}
+  \`\`\`
+- IF NO IMAGE WAS PROVIDED FOR AN ENTITY: Do not crash or render empty space! Render the clever vector / monogram / heraldic seal choreography defined in the visual prompt!
+`;
+  }
+
   const prompt = `${args.validationError ? `RETRY ${args.retryNumber ?? 1}.${retryDiagnosis}\n\n` : ""}SHOT DIRECTION:
 - Shot ID: ${args.shot.shotId} | Duration: ${durationFrames} frames (${(durationFrames / 60).toFixed(1)}s)
 - Spoken Narration: "${args.shot.spokenText}"
@@ -1288,6 +1508,7 @@ SOLUTION: Fix this exact issue in your TSX output now.`;
 - Composition: ${args.visualPrompt.composition || "Hero entity centered with dynamic camera tracking"}
 - Camera Choreography: ${args.visualPrompt.cameraChoreography || "Smooth POV zoom/pan tracking key entity"}
 - Key Elements: ${(args.visualPrompt.elements || []).join(", ")}
+${assetInstructions}
 - Word Cues (local frame sync):
 ${compactCues}
 
