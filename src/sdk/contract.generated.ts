@@ -15,6 +15,56 @@ export interface WordCue {
 
 export type ShotEnergy = 1 | 2 | 3;
 
+export type EntityCategory = "person" | "historical" | "product" | "organization" | "location" | "object";
+
+/** AI-detected entity that requires an image for optimal video presentation. */
+export interface EntityImageRequirement {
+  id: string;                       // Standardized snake_case slug (e.g. "king_baldwin", "elon_musk")
+  name: string;                     // Human-readable title (e.g. "King Baldwin IV")
+  targetFilename: string;           // Canonical filename prefix without extension (e.g. "king_baldwin")
+  category: EntityCategory;
+  rationale: string;                // Why an image enhances comprehension of this narrative beat
+  suggestedFraming: "portrait" | "landscape" | "square" | "transparent_cutout";
+  recommendedResolution?: string;  // e.g. "min 1080p, portrait aspect ratio"
+  importance: "essential" | "recommended" | "optional";
+  sentenceIndices: number[];        // Sentence indices discussing this entity
+  cleverFallbackIdea: string;       // Bespoke motion graphic alternative if user provides no image
+}
+
+export interface EntityAnalysisOutput {
+  entities: EntityImageRequirement[];
+  overallVisualTheme?: string;
+}
+
+/** Standardized, profiled image asset uploaded by the user and stored locally. */
+export interface UploadedImageAsset {
+  id: string;                       // Matches EntityImageRequirement.id
+  entityName: string;               // e.g. "King Baldwin IV"
+  originalFilename: string;         // User's original uploaded filename (e.g. "IMG_4920.JPEG")
+  standardizedFilename: string;     // Renamed canonical filename (e.g. "king_baldwin.jpeg")
+  url: string;                      // Object URL, data URL, or Vite disk serve URL
+  mimeType: string;                 // e.g. "image/jpeg"
+  width: number;                    // Real pixel width measured in browser
+  height: number;                   // Real pixel height measured in browser
+  aspectRatio: number;              // width / height
+  aspectRatioLabel: string;         // "3:4 portrait" | "16:9 landscape" | "1:1 square" | "custom"
+  fileSizeBytes: number;
+  uploadedAt: number;
+}
+
+export interface AssignedShotAsset {
+  assetId: string;
+  standardizedFilename: string;
+  status: "provided" | "missing_fallback";
+  role: "hero_portrait" | "split_evidence" | "dossier_badge" | "token" | "background_atmospheric";
+  placement: "center" | "left_half" | "right_half" | "corner_badge";
+  width?: number;
+  height?: number;
+  aspectRatio?: number;
+  aspectRatioLabel?: string;
+  fallbackVisualMetaphor?: string;  // Explicit vector direction if asset is missing
+}
+
 /** Planner output: what the audience should understand from this beat. */
 export interface CreativeShotPlan {
   shotId: string;
@@ -35,6 +85,7 @@ export interface CreativeShotPlan {
   transitionIn: Transition;
   transitionDirection: 1 | -1;
   continuityNote: string;
+  assignedAssets?: AssignedShotAsset[];
 }
 
 export type CreativePlanDraftShot = Omit<CreativeShotPlan, "wordStartIndex" | "wordEndIndex" | "act">;
@@ -98,6 +149,8 @@ export interface GeneratedFilm {
   sourceAudioName?: string;
   wordCues: WordCue[];
   shots: GeneratedSceneShot[];
+  assets?: UploadedImageAsset[];
+  entityRequirements?: EntityImageRequirement[];
   visualContinuity: {
     palette: string;
     typography: string;
